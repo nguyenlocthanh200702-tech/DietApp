@@ -4,10 +4,9 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // List of models to try in order
 const MODELS_TO_TRY = [
+  "gemini-2.5-flash-lite",
   "gemini-2.5-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
-  "gemini-pro",
+  "gemini-3.1-pro",
 ];
 
 async function tryCoachingWithModel(modelName, prompt) {
