@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 const ForgeApp = () => {
-  const [screen, setScreen] = useState('onboarding'); // onboarding, dashboard, log-meal, coach, progress, settings
+  const [screen, setScreen] = useState('onboarding'); // onboarding, onboarding-macros, dashboard, log-meal, coach, progress, settings
+  const [onboardingStep, setOnboardingStep] = useState(1); // 1: profile, 2: macro choice, 3: manual macros
   const [userData, setUserData] = useState(null);
   const [meals, setMeals] = useState([]);
   const [mealInput, setMealInput] = useState('');
@@ -63,8 +64,11 @@ const ForgeApp = () => {
     };
   };
 
-  // Handle onboarding
-  const handleOnboardingSubmit = (e) => {
+  // Store temporary onboarding data
+  const [tempOnboardingData, setTempOnboardingData] = useState(null);
+
+  // Handle onboarding step 1 (profile data)
+  const handleOnboardingStep1 = (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
     const data = {
@@ -72,13 +76,55 @@ const ForgeApp = () => {
       weight: parseFloat(formData.get('weight')),
       height: parseFloat(formData.get('height')),
       age: parseInt(formData.get('age')),
-      goal: formData.get('goal'),
-      activityLevel: formData.get('activity'),
+      gender: formData.get('gender'),
       dietaryRestrictions: formData.get('restrictions'),
       createdAt: new Date().toISOString()
     };
     
-    data.macroTargets = calculateMacroTargets(data.weight, data.height, data.age, data.goal, data.activityLevel);
+    setTempOnboardingData(data);
+    setOnboardingStep(2); // Move to macro choice step
+  };
+
+  // Handle macro choice (auto vs manual)
+  const handleMacroChoice = (choice) => {
+    if (choice === 'auto') {
+      // Auto-calculate based on goal and activity
+      const formData = new FormData(document.querySelector('form'));
+      const goal = formData.get('goal');
+      const activityLevel = formData.get('activity');
+      
+      const data = {
+        ...tempOnboardingData,
+        goal,
+        activityLevel
+      };
+      
+      data.macroTargets = calculateMacroTargets(data.weight, data.height, data.age, data.goal, data.activityLevel);
+      
+      localStorage.setItem('forgeUserData', JSON.stringify(data));
+      setUserData(data);
+      setScreen('dashboard');
+    } else {
+      // Manual macro input
+      setOnboardingStep(3);
+    }
+  };
+
+  // Handle manual macro input
+  const handleManualMacros = (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const data = {
+      ...tempOnboardingData,
+      goal: 'custom',
+      activityLevel: 'custom',
+      macroTargets: {
+        calories: parseInt(formData.get('calories')),
+        protein: parseInt(formData.get('protein')),
+        carbs: parseInt(formData.get('carbs')),
+        fat: parseInt(formData.get('fat'))
+      }
+    };
     
     localStorage.setItem('forgeUserData', JSON.stringify(data));
     setUserData(data);
@@ -271,207 +317,525 @@ const ForgeApp = () => {
 
   // Screens
   if (screen === 'onboarding') {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%)',
-        color: '#fff',
-        padding: '20px',
-        fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
-        <div style={{ maxWidth: '400px', width: '100%' }}>
-          <div style={{ marginBottom: '40px', textAlign: 'center' }}>
-            <h1 style={{ fontSize: '36px', margin: 0, fontWeight: 700, color: '#00d9ff', marginBottom: '8px' }}>FORGE</h1>
-            <p style={{ fontSize: '14px', color: '#999', margin: 0 }}>Your AI fitness diet coach</p>
+    // Step 1: Profile Information
+    if (onboardingStep === 1) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%)',
+          color: '#fff',
+          padding: '20px',
+          fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div style={{ maxWidth: '400px', width: '100%' }}>
+            <div style={{ marginBottom: '40px', textAlign: 'center' }}>
+              <h1 style={{ fontSize: '36px', margin: 0, fontWeight: 700, color: '#00d9ff', marginBottom: '8px' }}>FORGE</h1>
+              <p style={{ fontSize: '14px', color: '#999', margin: 0 }}>Your AI fitness diet coach</p>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              localStorage.setItem('forgeProfileData', JSON.stringify({
+                name: formData.get('name'),
+                weight: parseFloat(formData.get('weight')),
+                height: parseFloat(formData.get('height')),
+                age: parseInt(formData.get('age')),
+                goal: formData.get('goal'),
+                activityLevel: formData.get('activity'),
+                dietaryRestrictions: formData.get('restrictions'),
+              }));
+              setOnboardingStep(2);
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Name
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                    Weight (kg)
+                  </label>
+                  <input
+                    type="number"
+                    name="weight"
+                    required
+                    step="0.1"
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      background: '#222',
+                      border: '1px solid #333',
+                      borderRadius: '6px',
+                      color: '#fff',
+                      fontSize: '14px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                    Height (cm)
+                  </label>
+                  <input
+                    type="number"
+                    name="height"
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      background: '#222',
+                      border: '1px solid #333',
+                      borderRadius: '6px',
+                      color: '#fff',
+                      fontSize: '14px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Age
+                </label>
+                <input
+                  type="number"
+                  name="age"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Goal
+                </label>
+                <select
+                  name="goal"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="">Select your goal</option>
+                  <option value="build-muscle">Build muscle</option>
+                  <option value="lose-fat">Lose fat</option>
+                  <option value="maintain">Maintain</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Activity Level
+                </label>
+                <select
+                  name="activity"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="">Select activity level</option>
+                  <option value="sedentary">Sedentary (little exercise)</option>
+                  <option value="light">Light (1-3 days/week)</option>
+                  <option value="moderate">Moderate (3-5 days/week)</option>
+                  <option value="intense">Intense (6-7 days/week)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Dietary Restrictions (optional)
+                </label>
+                <input
+                  type="text"
+                  name="restrictions"
+                  placeholder="e.g., vegetarian, gluten-free"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  padding: '14px',
+                  background: '#00d9ff',
+                  color: '#000',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginTop: '8px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#00b8d4'}
+                onMouseLeave={(e) => e.target.style.background = '#00d9ff'}
+              >
+                Next: Set Macros
+              </button>
+            </form>
           </div>
+        </div>
+      );
+    }
 
-          <form onSubmit={handleOnboardingSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
-                Name
-              </label>
-              <input
-                type="text"
-                name="name"
-                required
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  background: '#222',
-                  border: '1px solid #333',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
+    // Step 2: Macro Setup Mode Choice
+    if (onboardingStep === 2) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%)',
+          color: '#fff',
+          padding: '20px',
+          fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div style={{ maxWidth: '400px', width: '100%' }}>
+            <div style={{ marginBottom: '40px', textAlign: 'center' }}>
+              <h1 style={{ fontSize: '28px', margin: 0, fontWeight: 700, marginBottom: '8px' }}>Set Your Macros</h1>
+              <p style={{ fontSize: '14px', color: '#999', margin: 0 }}>How would you like to set your daily targets?</p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Auto Calculate Option */}
+              <div
+                onClick={() => {
+                  const profileData = JSON.parse(localStorage.getItem('forgeProfileData'));
+                  const macroTargets = calculateMacroTargets(
+                    profileData.weight,
+                    profileData.height,
+                    profileData.age,
+                    profileData.goal,
+                    profileData.activityLevel
+                  );
+                  
+                  const userData = {
+                    ...profileData,
+                    macroTargets,
+                    createdAt: new Date().toISOString()
+                  };
+                  
+                  localStorage.setItem('forgeUserData', JSON.stringify(userData));
+                  localStorage.removeItem('forgeProfileData');
+                  setUserData(userData);
+                  setOnboardingStep(1);
+                  setScreen('dashboard');
                 }}
-              />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
-                  Weight (kg)
-                </label>
-                <input
-                  type="number"
-                  name="weight"
-                  required
-                  step="0.1"
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    background: '#222',
-                    border: '1px solid #333',
-                    borderRadius: '6px',
-                    color: '#fff',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
-                  Height (cm)
-                </label>
-                <input
-                  type="number"
-                  name="height"
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    background: '#222',
-                    border: '1px solid #333',
-                    borderRadius: '6px',
-                    color: '#fff',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
-                Age
-              </label>
-              <input
-                type="number"
-                name="age"
-                required
                 style={{
-                  width: '100%',
-                  padding: '12px',
-                  background: '#222',
-                  border: '1px solid #333',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
+                  padding: '20px',
+                  background: '#1a1a1a',
+                  border: '2px solid #00d9ff',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
                 }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
-                Goal
-              </label>
-              <select
-                name="goal"
-                required
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  background: '#222',
-                  border: '1px solid #333',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#222';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#1a1a1a';
+                  e.currentTarget.style.transform = 'translateY(0)';
                 }}
               >
-                <option value="">Select your goal</option>
-                <option value="build-muscle">Build muscle</option>
-                <option value="lose-fat">Lose fat</option>
-                <option value="maintain">Maintain</option>
-              </select>
-            </div>
+                <h3 style={{ fontSize: '16px', margin: '0 0 8px', fontWeight: 700, color: '#00d9ff' }}>
+                  Auto Calculate
+                </h3>
+                <p style={{ fontSize: '13px', color: '#999', margin: 0, lineHeight: '1.5' }}>
+                  I'll calculate your targets based on your weight, height, age, goal, and activity level using fitness formulas.
+                </p>
+              </div>
 
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
-                Activity Level
-              </label>
-              <select
-                name="activity"
-                required
+              {/* Custom Input Option */}
+              <div
+                onClick={() => setOnboardingStep(3)}
                 style={{
-                  width: '100%',
-                  padding: '12px',
-                  background: '#222',
-                  border: '1px solid #333',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
+                  padding: '20px',
+                  background: '#1a1a1a',
+                  border: '2px solid #00ff88',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#222';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#1a1a1a';
+                  e.currentTarget.style.transform = 'translateY(0)';
                 }}
               >
-                <option value="">Select activity level</option>
-                <option value="sedentary">Sedentary (little exercise)</option>
-                <option value="light">Light (1-3 days/week)</option>
-                <option value="moderate">Moderate (3-5 days/week)</option>
-                <option value="intense">Intense (6-7 days/week)</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
-                Dietary Restrictions (optional)
-              </label>
-              <input
-                type="text"
-                name="restrictions"
-                placeholder="e.g., vegetarian, gluten-free"
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  background: '#222',
-                  border: '1px solid #333',
-                  borderRadius: '6px',
-                  color: '#fff',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
+                <h3 style={{ fontSize: '16px', margin: '0 0 8px', fontWeight: 700, color: '#00ff88' }}>
+                  Custom Input
+                </h3>
+                <p style={{ fontSize: '13px', color: '#999', margin: 0, lineHeight: '1.5' }}>
+                  I already have my macro targets. Let me enter them manually.
+                </p>
+              </div>
             </div>
 
             <button
-              type="submit"
+              onClick={() => setOnboardingStep(1)}
               style={{
-                padding: '14px',
-                background: '#00d9ff',
-                color: '#000',
-                border: 'none',
+                width: '100%',
+                padding: '12px',
+                background: 'transparent',
+                color: '#999',
+                border: '1px solid #333',
                 borderRadius: '6px',
-                fontSize: '14px',
                 fontWeight: 600,
                 cursor: 'pointer',
-                marginTop: '8px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                transition: 'all 0.2s'
+                fontSize: '12px',
+                marginTop: '24px'
               }}
-              onMouseEnter={(e) => e.target.style.background = '#00b8d4'}
-              onMouseLeave={(e) => e.target.style.background = '#00d9ff'}
             >
-              Start Training
+              ← Back
             </button>
-          </form>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+
+    // Step 3: Custom Macro Input
+    if (onboardingStep === 3) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%)',
+          color: '#fff',
+          padding: '20px',
+          fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div style={{ maxWidth: '400px', width: '100%' }}>
+            <div style={{ marginBottom: '40px', textAlign: 'center' }}>
+              <h1 style={{ fontSize: '28px', margin: 0, fontWeight: 700, marginBottom: '8px' }}>Enter Your Targets</h1>
+              <p style={{ fontSize: '14px', color: '#999', margin: 0 }}>Daily macro goals</p>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              const profileData = JSON.parse(localStorage.getItem('forgeProfileData'));
+              
+              const userData = {
+                ...profileData,
+                macroTargets: {
+                  calories: parseInt(formData.get('calories')),
+                  protein: parseInt(formData.get('protein')),
+                  carbs: parseInt(formData.get('carbs')),
+                  fat: parseInt(formData.get('fat'))
+                },
+                createdAt: new Date().toISOString()
+              };
+              
+              localStorage.setItem('forgeUserData', JSON.stringify(userData));
+              localStorage.removeItem('forgeProfileData');
+              setUserData(userData);
+              setOnboardingStep(1);
+              setScreen('dashboard');
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#ffa500', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Daily Calories
+                </label>
+                <input
+                  type="number"
+                  name="calories"
+                  required
+                  min="1200"
+                  max="10000"
+                  placeholder="e.g., 2500"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Daily Protein (g)
+                </label>
+                <input
+                  type="number"
+                  name="protein"
+                  required
+                  min="20"
+                  max="500"
+                  placeholder="e.g., 150"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00ff88', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Daily Carbs (g)
+                </label>
+                <input
+                  type="number"
+                  name="carbs"
+                  required
+                  min="20"
+                  max="500"
+                  placeholder="e.g., 250"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#ff6b6b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Daily Fat (g)
+                </label>
+                <input
+                  type="number"
+                  name="fat"
+                  required
+                  min="10"
+                  max="300"
+                  placeholder="e.g., 80"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  padding: '14px',
+                  background: '#00d9ff',
+                  color: '#000',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginTop: '8px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#00b8d4'}
+                onMouseLeave={(e) => e.target.style.background = '#00d9ff'}
+              >
+                Start Training
+              </button>
+            </form>
+
+            <button
+              onClick={() => setOnboardingStep(2)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: 'transparent',
+                color: '#999',
+                border: '1px solid #333',
+                borderRadius: '6px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '12px',
+                marginTop: '12px'
+              }}
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
+      );
+    }
   }
 
   // Dashboard
