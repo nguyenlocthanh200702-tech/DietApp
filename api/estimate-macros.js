@@ -2,6 +2,30 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// List of models to try in order
+const MODELS_TO_TRY = [
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-pro",
+];
+
+async function tryEstimateWithModel(modelName, prompt) {
+  try {
+    const model = genAI.getGenerativeModel({ model: modelName });
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    const text = response.text();
+    const cleanedText = text.replace(/```json\n?|\n?```/g, "").trim();
+    const macros = JSON.parse(cleanedText);
+    console.log(`Successfully used model: ${modelName}`);
+    return macros;
+  } catch (error) {
+    console.log(`Model ${modelName} failed: ${error.message}`);
+    throw error;
+  }
+}
+
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -27,28 +51,26 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Meal description is required" });
   }
 
-  try {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
-    const prompt = `Estimate the macronutrients for this meal description. Be realistic but slightly conservative in estimates. Return ONLY valid JSON with no markdown or extra text, in this exact format:
+  const prompt = `Estimate the macronutrients for this meal description. Be realistic but slightly conservative in estimates. Return ONLY valid JSON with no markdown or extra text, in this exact format:
 {"mealName":"","calories":0,"protein":0,"carbs":0,"fat":0,"notes":""}
 
 Meal: ${mealDescription}`;
 
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const text = response.text();
-
-    // Clean up the response (remove markdown if present)
-    const cleanedText = text.replace(/```json\n?|\n?```/g, "").trim();
-    const macros = JSON.parse(cleanedText);
-
-    return res.status(200).json(macros);
-  } catch (error) {
-    console.error("Gemini API error:", error);
-    return res.status(500).json({
-      error: "Failed to estimate macros",
-      details: error.message,
-    });
+  // Try each model until one works
+  for (const modelName of MODELS_TO_TRY) {
+    try {
+      const macros = await tryEstimateWithModel(modelName, prompt);
+      return res.status(200).json(macros);
+    } catch (error) {
+      // Continue to next model
+      continue;
+    }
   }
+
+  // If all models failed
+  console.error("All models failed");
+  return res.status(500).json({
+    error: "Failed to estimate macros with any available model",
+    details: "No compatible Gemini models found",
+  });
 }

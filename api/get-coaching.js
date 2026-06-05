@@ -2,6 +2,28 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// List of models to try in order
+const MODELS_TO_TRY = [
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-pro",
+];
+
+async function tryCoachingWithModel(modelName, prompt) {
+  try {
+    const model = genAI.getGenerativeModel({ model: modelName });
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    const advice = response.text();
+    console.log(`Successfully used model: ${modelName}`);
+    return advice;
+  } catch (error) {
+    console.log(`Model ${modelName} failed: ${error.message}`);
+    throw error;
+  }
+}
+
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -27,10 +49,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Meal summary is required" });
   }
 
-  try {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
-    const prompt = `You are a supportive fitness coach. Analyze this person's nutrition data from the last 7 days and give brief, actionable advice.
+  const prompt = `You are a supportive fitness coach. Analyze this person's nutrition data from the last 7 days and give brief, actionable advice.
 
 Their macro targets: ${macroTargets.calories} cal, ${macroTargets.protein}g protein, ${macroTargets.carbs}g carbs, ${macroTargets.fat}g fat per day
 
@@ -41,16 +60,21 @@ ${mealSummary || "No meal data yet"}
 
 Give 2-3 specific, encouraging observations and suggestions. Keep it friendly and motivating, not preachy. Format as plain text paragraphs. Be concise and actionable.`;
 
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const advice = response.text();
-
-    return res.status(200).json({ advice });
-  } catch (error) {
-    console.error("Gemini API error:", error);
-    return res.status(500).json({
-      error: "Failed to get coaching advice",
-      details: error.message,
-    });
+  // Try each model until one works
+  for (const modelName of MODELS_TO_TRY) {
+    try {
+      const advice = await tryCoachingWithModel(modelName, prompt);
+      return res.status(200).json({ advice });
+    } catch (error) {
+      // Continue to next model
+      continue;
+    }
   }
+
+  // If all models failed
+  console.error("All models failed");
+  return res.status(500).json({
+    error: "Failed to get coaching advice with any available model",
+    details: "No compatible Gemini models found",
+  });
 }
