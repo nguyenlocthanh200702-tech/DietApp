@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 const ForgeApp = () => {
-  const [screen, setScreen] = useState('onboarding'); // onboarding, dashboard, log-meal, coach, progress, settings
+  const [screen, setScreen] = useState('onboarding'); // onboarding, onboarding-macros, dashboard, log-meal, coach, progress, settings
+  const [onboardingStep, setOnboardingStep] = useState(1); // 1: profile, 2: macro choice, 3: manual macros
   const [userData, setUserData] = useState(null);
   const [meals, setMeals] = useState([]);
   const [mealInput, setMealInput] = useState('');
@@ -63,8 +64,11 @@ const ForgeApp = () => {
     };
   };
 
-  // Handle onboarding
-  const handleOnboardingSubmit = (e) => {
+  // Store temporary onboarding data
+  const [tempOnboardingData, setTempOnboardingData] = useState(null);
+
+  // Handle onboarding step 1 (profile data)
+  const handleOnboardingStep1 = (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
     const data = {
@@ -72,13 +76,55 @@ const ForgeApp = () => {
       weight: parseFloat(formData.get('weight')),
       height: parseFloat(formData.get('height')),
       age: parseInt(formData.get('age')),
-      goal: formData.get('goal'),
-      activityLevel: formData.get('activity'),
+      gender: formData.get('gender'),
       dietaryRestrictions: formData.get('restrictions'),
       createdAt: new Date().toISOString()
     };
     
-    data.macroTargets = calculateMacroTargets(data.weight, data.height, data.age, data.goal, data.activityLevel);
+    setTempOnboardingData(data);
+    setOnboardingStep(2); // Move to macro choice step
+  };
+
+  // Handle macro choice (auto vs manual)
+  const handleMacroChoice = (choice) => {
+    if (choice === 'auto') {
+      // Auto-calculate based on goal and activity
+      const formData = new FormData(document.querySelector('form'));
+      const goal = formData.get('goal');
+      const activityLevel = formData.get('activity');
+      
+      const data = {
+        ...tempOnboardingData,
+        goal,
+        activityLevel
+      };
+      
+      data.macroTargets = calculateMacroTargets(data.weight, data.height, data.age, data.goal, data.activityLevel);
+      
+      localStorage.setItem('forgeUserData', JSON.stringify(data));
+      setUserData(data);
+      setScreen('dashboard');
+    } else {
+      // Manual macro input
+      setOnboardingStep(3);
+    }
+  };
+
+  // Handle manual macro input
+  const handleManualMacros = (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const data = {
+      ...tempOnboardingData,
+      goal: 'custom',
+      activityLevel: 'custom',
+      macroTargets: {
+        calories: parseInt(formData.get('calories')),
+        protein: parseInt(formData.get('protein')),
+        carbs: parseInt(formData.get('carbs')),
+        fat: parseInt(formData.get('fat'))
+      }
+    };
     
     localStorage.setItem('forgeUserData', JSON.stringify(data));
     setUserData(data);
