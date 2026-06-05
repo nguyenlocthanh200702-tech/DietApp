@@ -64,72 +64,9 @@ const ForgeApp = () => {
     };
   };
 
-  // Store temporary onboarding data
-  const [tempOnboardingData, setTempOnboardingData] = useState(null);
 
-  // Handle onboarding step 1 (profile data)
-  const handleOnboardingStep1 = (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const data = {
-      name: formData.get('name'),
-      weight: parseFloat(formData.get('weight')),
-      height: parseFloat(formData.get('height')),
-      age: parseInt(formData.get('age')),
-      gender: formData.get('gender'),
-      dietaryRestrictions: formData.get('restrictions'),
-      createdAt: new Date().toISOString()
-    };
-    
-    setTempOnboardingData(data);
-    setOnboardingStep(2); // Move to macro choice step
-  };
 
-  // Handle macro choice (auto vs manual)
-  const handleMacroChoice = (choice) => {
-    if (choice === 'auto') {
-      // Auto-calculate based on goal and activity
-      const formData = new FormData(document.querySelector('form'));
-      const goal = formData.get('goal');
-      const activityLevel = formData.get('activity');
-      
-      const data = {
-        ...tempOnboardingData,
-        goal,
-        activityLevel
-      };
-      
-      data.macroTargets = calculateMacroTargets(data.weight, data.height, data.age, data.goal, data.activityLevel);
-      
-      localStorage.setItem('forgeUserData', JSON.stringify(data));
-      setUserData(data);
-      setScreen('dashboard');
-    } else {
-      // Manual macro input
-      setOnboardingStep(3);
-    }
-  };
 
-  // Handle manual macro input
-  const handleManualMacros = (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const data = {
-      ...tempOnboardingData,
-      goal: 'custom',
-      activityLevel: 'custom',
-      macroTargets: {
-        calories: parseInt(formData.get('calories')),
-        protein: parseInt(formData.get('protein')),
-        carbs: parseInt(formData.get('carbs')),
-        fat: parseInt(formData.get('fat'))
-      }
-    };
-    
-    localStorage.setItem('forgeUserData', JSON.stringify(data));
-    setUserData(data);
-    setScreen('dashboard');
-  };
 
   // Call backend API for meal estimation
   const estimateMealMacros = async (mealDescription) => {
