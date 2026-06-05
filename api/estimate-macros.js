@@ -28,7 +28,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
     const prompt = `Estimate the macronutrients for this meal description. Be realistic but slightly conservative in estimates. Return ONLY valid JSON with no markdown or extra text, in this exact format:
 {"mealName":"","calories":0,"protein":0,"carbs":0,"fat":0,"notes":""}
