@@ -217,23 +217,26 @@ const ForgeApp = () => {
 
   const todayTotals = getTodayTotals();
 
-  // Macro ring component
+  // Macro ring component (responsive)
   const MacroRing = ({ label, current, target, color }) => {
     const percentage = Math.min((current / target) * 100, 100);
-    const circumference = 2 * Math.PI * 45;
+    const radius = 35;
+    const circumference = 2 * Math.PI * radius;
     const strokeDashoffset = circumference - (percentage / 100) * circumference;
+    const svgSize = 90;
+    const svgCenter = svgSize / 2;
     
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-        <svg width="120" height="120" style={{ transform: 'rotate(-90deg)' }}>
-          <circle cx="60" cy="60" r="45" fill="none" stroke="#333" strokeWidth="8" />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+        <svg width={svgSize} height={svgSize} style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx={svgCenter} cy={svgCenter} r={radius} fill="none" stroke="#333" strokeWidth="6" />
           <circle
-            cx="60"
-            cy="60"
-            r="45"
+            cx={svgCenter}
+            cy={svgCenter}
+            r={radius}
             fill="none"
             stroke={color}
-            strokeWidth="8"
+            strokeWidth="6"
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
             strokeLinecap="round"
@@ -241,10 +244,10 @@ const ForgeApp = () => {
           />
         </svg>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '12px', color: '#999', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.5px' }}>
+          <div style={{ fontSize: '11px', color: '#999', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.5px' }}>
             {label}
           </div>
-          <div style={{ fontSize: '16px', fontWeight: 600, color: '#fff', marginTop: '4px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', marginTop: '3px' }}>
             {Math.round(current)} / {target}
           </div>
         </div>
@@ -796,7 +799,13 @@ const ForgeApp = () => {
           </div>
 
           {/* Macro Rings */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '40px' }}>
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))',
+            gap: '10px', 
+            marginBottom: '40px',
+            maxWidth: '100%'
+          }}>
             <MacroRing label="Protein" current={todayTotals.protein} target={userData?.macroTargets.protein || 150} color="#00d9ff" />
             <MacroRing label="Carbs" current={todayTotals.carbs} target={userData?.macroTargets.carbs || 250} color="#00ff88" />
             <MacroRing label="Fat" current={todayTotals.fat} target={userData?.macroTargets.fat || 80} color="#ff6b6b" />
