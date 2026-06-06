@@ -128,24 +128,6 @@ const ForgeApp = () => {
     }
   };
 
-  // Update water intake
-  const updateWaterIntake = (amount) => {
-    const today = new Date().toISOString().split('T')[0];
-    const currentIntake = waterTracker[today] || 0;
-    const newIntake = Math.max(0, Math.min(currentIntake + amount, userData?.waterGoal || 2000));
-    
-    setWaterTracker({
-      ...waterTracker,
-      [today]: newIntake
-    });
-    
-    // Save to localStorage
-    localStorage.setItem('forgeWaterTracker', JSON.stringify({
-      ...waterTracker,
-      [today]: newIntake
-    }));
-  };
-
   // Get today's water intake
   const getTodayWaterIntake = () => {
     const today = new Date().toISOString().split('T')[0];
