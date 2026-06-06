@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       userProfile = { name: "there", goal, macroTargets };
       messages = [{
         role: "user",
-        content: "Based on my recent meal data, give me a brief personalized nutrition analysis and 2-3 actionable tips."
+        content: `Analyze my logged meals below and give me a brief personalized nutrition analysis with 2-3 actionable tips. Use only this data — do not ask me to provide meals.\n\n${mealSummary || "No meals logged in the last 7 days."}`
       }];
     } else {
       return res.status(400).json({ error: "Messages and userProfile are required" });
@@ -48,13 +48,16 @@ Their profile:
 - Daily macro targets: ${userProfile.macroTargets?.calories} cal, ${userProfile.macroTargets?.protein}g protein, ${userProfile.macroTargets?.carbs}g carbs, ${userProfile.macroTargets?.fat}g fat
 ${userProfile.dietaryRestrictions ? `- Dietary restrictions: ${userProfile.dietaryRestrictions}` : ''}
 
-Their recent nutrition data (last 7 days):
-${mealSummary || 'No meal data yet'}
+Their logged meal data (already tracked in the app — last 7 days):
+${mealSummary || 'No meals logged in the last 7 days.'}
 
 Rules for your responses:
+- The meal log above is REAL data the user already entered in the app — always analyze it directly
+- NEVER ask the user to log meals, enter food, or describe what they ate — you already have it
+- If no meals are listed, tell them to use the Log Meal feature — do not ask them to type out meals in chat
 - Keep answers SHORT and DIRECT — 2 to 4 sentences max
 - Be warm and encouraging, not clinical or preachy
-- Give specific numbers when relevant (grams, calories)
+- Reference specific meals, foods, and macro numbers from the log when giving advice
 - Always keep their goal and dietary restrictions in mind
 - If they ask about substitutions, give a direct yes/no + brief reason
 - Never pad with unnecessary disclaimers

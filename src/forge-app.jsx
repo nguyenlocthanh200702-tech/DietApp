@@ -194,32 +194,62 @@ const ForgeApp = () => {
     }
   };
 
+  const buildCoachMealContext = (macroTargets) => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    const recentMeals = meals.filter(m => new Date(m.timestamp) >= sevenDaysAgo);
+    if (recentMeals.length === 0) {
+      return 'No meals logged in the last 7 days.';
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const dailyMeals = {};
+    const dailyTotals = {};
+
+    recentMeals.forEach(meal => {
+      const date = meal.timestamp.split('T')[0];
+      if (!dailyMeals[date]) dailyMeals[date] = [];
+      if (!dailyTotals[date]) dailyTotals[date] = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
+      dailyMeals[date].push(meal);
+      dailyTotals[date].calories += meal.calories || 0;
+      dailyTotals[date].protein += meal.protein || 0;
+      dailyTotals[date].carbs += meal.carbs || 0;
+      dailyTotals[date].fat += meal.fat || 0;
+    });
+
+    const lines = ['LOGGED MEALS (last 7 days):'];
+
+    Object.keys(dailyMeals).sort().forEach(date => {
+      lines.push(`\n${date}:`);
+      dailyMeals[date].forEach(meal => {
+        const label = meal.mealName || 'Meal';
+        const desc = meal.description ? ` — ${meal.description}` : '';
+        lines.push(`  - ${label}${desc}: ${meal.calories || 0} cal, ${meal.protein || 0}g protein, ${meal.carbs || 0}g carbs, ${meal.fat || 0}g fat`);
+      });
+      const totals = dailyTotals[date];
+      lines.push(`  Daily total: ${totals.calories} cal, ${totals.protein}g protein, ${totals.carbs}g carbs, ${totals.fat}g fat`);
+    });
+
+    if (macroTargets) {
+      const todayTotals = dailyTotals[today] || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+      lines.push('\nTODAY vs DAILY TARGETS:');
+      lines.push(`  Calories: ${todayTotals.calories}/${macroTargets.calories}`);
+      lines.push(`  Protein: ${todayTotals.protein}g/${macroTargets.protein}g`);
+      lines.push(`  Carbs: ${todayTotals.carbs}g/${macroTargets.carbs}g`);
+      lines.push(`  Fat: ${todayTotals.fat}g/${macroTargets.fat}g`);
+    }
+
+    return lines.join('\n');
+  };
+
   // Call backend for coaching advice
   const generateCoachAdvice = async () => {
     setCoachLoading(true);
-    
-    const last7Days = meals.filter(m => {
-      const mealDate = new Date(m.timestamp);
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      return mealDate >= sevenDaysAgo;
-    });
 
-    const dailyData = {};
-    last7Days.forEach(meal => {
-      const date = meal.timestamp.split('T')[0];
-      if (!dailyData[date]) {
-        dailyData[date] = { calories: 0, protein: 0, carbs: 0, fat: 0 };
-      }
-      dailyData[date].calories += meal.calories;
-      dailyData[date].protein += meal.protein;
-      dailyData[date].carbs += meal.carbs;
-      dailyData[date].fat += meal.fat;
-    });
-
-    const summary = Object.entries(dailyData).map(([date, macros]) => 
-      `${date}: ${macros.calories}cal, ${macros.protein}g protein, ${macros.carbs}g carbs, ${macros.fat}g fat`
-    ).join('\n');
+    const mealSummary = buildCoachMealContext(userData?.macroTargets);
 
     try {
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'https://your-vercel-function.vercel.app';
@@ -232,7 +262,7 @@ const ForgeApp = () => {
         body: JSON.stringify({
           messages: [{
             role: 'user',
-            content: 'Based on my recent meal data, give me a brief personalized nutrition analysis and 2-3 actionable tips.'
+            content: `Analyze my logged meals below and give me a brief personalized nutrition analysis with 2-3 actionable tips. Use only this data — do not ask me to provide meals.\n\n${mealSummary}`
           }],
           userProfile: {
             name: userData.name,
@@ -241,7 +271,7 @@ const ForgeApp = () => {
             macroTargets: userData.macroTargets,
             dietaryRestrictions: userData.dietaryRestrictions
           },
-          mealSummary: summary || 'No meal data yet'
+          mealSummary
         })
       });
 
@@ -270,27 +300,7 @@ const ForgeApp = () => {
     setChatInput('');
     setChatLoading(true);
 
-    // Build context summary
-    const last7Days = meals.filter(m => {
-      const mealDate = new Date(m.timestamp);
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      return mealDate >= sevenDaysAgo;
-    });
-
-    const dailyData = {};
-    last7Days.forEach(meal => {
-      const date = meal.timestamp.split('T')[0];
-      if (!dailyData[date]) dailyData[date] = { calories: 0, protein: 0, carbs: 0, fat: 0 };
-      dailyData[date].calories += meal.calories;
-      dailyData[date].protein += meal.protein;
-      dailyData[date].carbs += meal.carbs;
-      dailyData[date].fat += meal.fat;
-    });
-
-    const mealSummary = Object.entries(dailyData).map(([date, m]) =>
-      `${date}: ${m.calories}cal, ${m.protein}g protein, ${m.carbs}g carbs, ${m.fat}g fat`
-    ).join('\n') || 'No meal data yet';
+    const mealSummary = buildCoachMealContext(userData?.macroTargets);
 
     // Build conversation history for context
     const conversationHistory = updatedMessages.map(m => ({
