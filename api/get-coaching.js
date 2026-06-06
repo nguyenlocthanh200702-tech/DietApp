@@ -20,10 +20,23 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { messages, userProfile, mealSummary } = req.body;
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ error: "GEMINI_API_KEY is not configured" });
+  }
 
+  let { messages, userProfile, mealSummary, goal, macroTargets } = req.body;
+
+  // Support legacy nutrition-analysis payload from older frontends
   if (!messages || !userProfile) {
-    return res.status(400).json({ error: "Messages and userProfile are required" });
+    if (goal && macroTargets) {
+      userProfile = { name: "there", goal, macroTargets };
+      messages = [{
+        role: "user",
+        content: "Based on my recent meal data, give me a brief personalized nutrition analysis and 2-3 actionable tips."
+      }];
+    } else {
+      return res.status(400).json({ error: "Messages and userProfile are required" });
+    }
   }
 
   // Build system prompt with user context
