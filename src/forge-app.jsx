@@ -230,9 +230,18 @@ const ForgeApp = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          mealSummary: summary,
-          goal: userData.goal,
-          macroTargets: userData.macroTargets
+          messages: [{
+            role: 'user',
+            content: 'Based on my recent meal data, give me a brief personalized nutrition analysis and 2-3 actionable tips.'
+          }],
+          userProfile: {
+            name: userData.name,
+            goal: userData.goal,
+            weight: userData.weight,
+            macroTargets: userData.macroTargets,
+            dietaryRestrictions: userData.dietaryRestrictions
+          },
+          mealSummary: summary || 'No meal data yet'
         })
       });
 
@@ -241,7 +250,7 @@ const ForgeApp = () => {
       }
 
       const data = await response.json();
-      setCoachAdvice(data.advice);
+      setCoachAdvice(data.reply);
     } catch (error) {
       console.error('Error getting coach advice:', error);
       setCoachAdvice('Unable to get advice right now. Keep logging your meals!');
@@ -291,7 +300,7 @@ const ForgeApp = () => {
 
     try {
       const backendUrl = process.env.REACT_APP_BACKEND_URL || 'https://your-vercel-function.vercel.app';
-      const response = await fetch(`${backendUrl}/api/chat-coach`, {
+      const response = await fetch(`${backendUrl}/api/get-coaching`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
