@@ -9,17 +9,24 @@ const ForgeApp = () => {
   const [mealInput, setMealInput] = useState('');
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachAdvice, setCoachAdvice] = useState('');
+  const [editingMealId, setEditingMealId] = useState(null);
+  const [editingMealInput, setEditingMealInput] = useState('');
+  const [waterTracker, setWaterTracker] = useState({});
 
   // Load data from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('forgeUserData');
     const savedMeals = localStorage.getItem('forgeMeals');
+    const savedWater = localStorage.getItem('forgeWaterTracker');
     if (saved) {
       setUserData(JSON.parse(saved));
       setScreen('dashboard');
     }
     if (savedMeals) {
       setMeals(JSON.parse(savedMeals));
+    }
+    if (savedWater) {
+      setWaterTracker(JSON.parse(savedWater));
     }
   }, []);
 
@@ -121,6 +128,30 @@ const ForgeApp = () => {
     }
   };
 
+  // Update water intake
+  const updateWaterIntake = (amount) => {
+    const today = new Date().toISOString().split('T')[0];
+    const currentIntake = waterTracker[today] || 0;
+    const newIntake = Math.max(0, Math.min(currentIntake + amount, userData?.waterGoal || 2000));
+    
+    setWaterTracker({
+      ...waterTracker,
+      [today]: newIntake
+    });
+    
+    // Save to localStorage
+    localStorage.setItem('forgeWaterTracker', JSON.stringify({
+      ...waterTracker,
+      [today]: newIntake
+    }));
+  };
+
+  // Get today's water intake
+  const getTodayWaterIntake = () => {
+    const today = new Date().toISOString().split('T')[0];
+    return waterTracker[today] || 0;
+  };
+
   // Get today's totals
   const getTodayTotals = () => {
     const today = new Date().toISOString().split('T')[0];
@@ -132,6 +163,50 @@ const ForgeApp = () => {
       carbs: todayMeals.reduce((sum, m) => sum + m.carbs, 0),
       fat: todayMeals.reduce((sum, m) => sum + m.fat, 0)
     };
+  };
+
+  // Delete a meal
+  const deleteMeal = (mealId) => {
+    setMeals(meals.filter(m => m.id !== mealId));
+  };
+
+  // Start editing a meal
+  const startEditingMeal = (meal) => {
+    setEditingMealId(meal.id);
+    setEditingMealInput(meal.description);
+  };
+
+  // Cancel editing
+  const cancelEditMeal = () => {
+    setEditingMealId(null);
+    setEditingMealInput('');
+  };
+
+  // Save edited meal
+  const saveEditedMeal = async (mealId) => {
+    if (!editingMealInput.trim()) return;
+
+    // Re-estimate macros for the new description
+    const macros = await estimateMealMacros(editingMealInput);
+    
+    if (macros) {
+      setMeals(meals.map(m => 
+        m.id === mealId 
+          ? {
+              ...m,
+              description: editingMealInput,
+              mealName: macros.mealName || 'Meal',
+              calories: macros.calories,
+              protein: macros.protein,
+              carbs: macros.carbs,
+              fat: macros.fat
+            }
+          : m
+      ));
+      
+      setEditingMealId(null);
+      setEditingMealInput('');
+    }
   };
 
   // Call backend for coaching advice
@@ -199,7 +274,17 @@ const ForgeApp = () => {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
       const dateStr = date.toISOString().split('T')[0];
-      data[dateStr] = { date: dateStr, calories: 0, protein: 0, carbs: 0, fat: 0, target: userData?.macroTargets.calories || 0, proteinTarget: userData?.macroTargets.protein || 0 };
+      data[dateStr] = {
+        date: dateStr,
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        target: userData?.macroTargets.calories || 0,
+        proteinTarget: userData?.macroTargets.protein || 0,
+        water: waterTracker[dateStr] || 0,
+        waterTarget: userData?.waterGoal || 2000
+      };
     }
     
     meals.forEach(meal => {
@@ -507,17 +592,16 @@ const ForgeApp = () => {
                     profileData.activityLevel
                   );
                   
-                  const userData = {
+                  const newUserData = {
                     ...profileData,
                     macroTargets,
                     createdAt: new Date().toISOString()
                   };
                   
-                  localStorage.setItem('forgeUserData', JSON.stringify(userData));
+                  localStorage.setItem('forgeUserData', JSON.stringify(newUserData));
                   localStorage.removeItem('forgeProfileData');
-                  setUserData(userData);
-                  setOnboardingStep(1);
-                  setScreen('dashboard');
+                  setUserData(newUserData);
+                  setOnboardingStep(4); // Go to water setup
                 }}
                 style={{
                   padding: '20px',
@@ -619,7 +703,7 @@ const ForgeApp = () => {
               const formData = new FormData(e.target);
               const profileData = JSON.parse(localStorage.getItem('forgeProfileData'));
               
-              const userData = {
+              const newUserData = {
                 ...profileData,
                 macroTargets: {
                   calories: parseInt(formData.get('calories')),
@@ -629,12 +713,11 @@ const ForgeApp = () => {
                 },
                 createdAt: new Date().toISOString()
               };
-              
-              localStorage.setItem('forgeUserData', JSON.stringify(userData));
+
+              localStorage.setItem('forgeUserData', JSON.stringify(newUserData));
               localStorage.removeItem('forgeProfileData');
-              setUserData(userData);
-              setOnboardingStep(1);
-              setScreen('dashboard');
+              setUserData(newUserData);
+              setOnboardingStep(4); // Go to water setup
             }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '12px', color: '#ffa500', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
@@ -776,6 +859,246 @@ const ForgeApp = () => {
         </div>
       );
     }
+
+    // Step 4: Water Goal Setup
+    if (onboardingStep === 4) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%)',
+          color: '#fff',
+          padding: '20px',
+          fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div style={{ maxWidth: '400px', width: '100%' }}>
+            <div style={{ marginBottom: '40px', textAlign: 'center' }}>
+              <h1 style={{ fontSize: '28px', margin: 0, fontWeight: 700, marginBottom: '8px' }}>Water Goal</h1>
+              <p style={{ fontSize: '14px', color: '#999', margin: 0 }}>Stay hydrated during your fitness journey</p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Auto Calculate Option */}
+              <div
+                onClick={() => {
+                  const savedUser = JSON.parse(localStorage.getItem('forgeUserData'));
+                  // Auto water goal: standard 2000ml recommendation
+                  const waterGoal = Math.round((savedUser.weight || 70) * 35 / 100) * 100;
+                  savedUser.waterGoal = Math.max(waterGoal, 2000);
+                  savedUser.bottleSize = 2000;
+                  localStorage.setItem('forgeUserData', JSON.stringify(savedUser));
+                  setUserData(savedUser);
+                  setOnboardingStep(1);
+                  setScreen('dashboard');
+                }}
+                style={{
+                  padding: '20px',
+                  background: '#1a1a1a',
+                  border: '2px solid #00d9ff',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#222';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#1a1a1a';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <h3 style={{ fontSize: '16px', margin: '0 0 8px', fontWeight: 700, color: '#00d9ff' }}>
+                  Auto Calculate
+                </h3>
+                <p style={{ fontSize: '13px', color: '#999', margin: 0, lineHeight: '1.5' }}>
+                  Calculates based on your body weight (~35ml per kg). Minimum 2000ml/day.
+                </p>
+              </div>
+
+              {/* Custom Input Option */}
+              <div
+                onClick={() => setOnboardingStep(5)}
+                style={{
+                  padding: '20px',
+                  background: '#1a1a1a',
+                  border: '2px solid #00ff88',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#222';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#1a1a1a';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <h3 style={{ fontSize: '16px', margin: '0 0 8px', fontWeight: 700, color: '#00ff88' }}>
+                  Custom Input
+                </h3>
+                <p style={{ fontSize: '13px', color: '#999', margin: 0, lineHeight: '1.5' }}>
+                  Set your own water goal and bottle size
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setOnboardingStep(3)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: 'transparent',
+                color: '#999',
+                border: '1px solid #333',
+                borderRadius: '6px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '12px',
+                marginTop: '24px'
+              }}
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Step 5: Custom Water Goal
+    if (onboardingStep === 5) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%)',
+          color: '#fff',
+          padding: '20px',
+          fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div style={{ maxWidth: '400px', width: '100%' }}>
+            <div style={{ marginBottom: '40px', textAlign: 'center' }}>
+              <h1 style={{ fontSize: '28px', margin: 0, fontWeight: 700, marginBottom: '8px' }}>Set Water Goal</h1>
+              <p style={{ fontSize: '14px', color: '#999', margin: 0 }}>Daily water target (ml)</p>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              const savedUser = JSON.parse(localStorage.getItem('forgeUserData'));
+              
+              savedUser.waterGoal = parseInt(formData.get('waterGoal'));
+              savedUser.bottleSize = parseInt(formData.get('bottleSize'));
+              
+              localStorage.setItem('forgeUserData', JSON.stringify(savedUser));
+              setUserData(savedUser);
+              setOnboardingStep(1);
+              setScreen('dashboard');
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#4fc3f7', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Daily Water Goal (ml)
+                </label>
+                <input
+                  type="number"
+                  name="waterGoal"
+                  required
+                  min="500"
+                  max="10000"
+                  step="100"
+                  defaultValue="2000"
+                  placeholder="e.g., 2000"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#4fc3f7', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Bottle Size (ml)
+                </label>
+                <select
+                  name="bottleSize"
+                  required
+                  defaultValue="2000"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#222',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="250">250ml (small glass)</option>
+                  <option value="500">500ml (standard bottle)</option>
+                  <option value="750">750ml (medium bottle)</option>
+                  <option value="1000">1000ml (1L bottle)</option>
+                  <option value="1500">1500ml (1.5L bottle)</option>
+                  <option value="2000">2000ml (2L bottle)</option>
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  padding: '14px',
+                  background: '#4fc3f7',
+                  color: '#000',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginTop: '8px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#29b6f6'}
+                onMouseLeave={(e) => e.target.style.background = '#4fc3f7'}
+              >
+                Start Training
+              </button>
+            </form>
+
+            <button
+              onClick={() => setOnboardingStep(4)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: 'transparent',
+                color: '#999',
+                border: '1px solid #333',
+                borderRadius: '6px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '12px',
+                marginTop: '12px'
+              }}
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
+      );
+    }
   }
 
   // Dashboard
@@ -812,6 +1135,149 @@ const ForgeApp = () => {
             <MacroRing label="Calories" current={todayTotals.calories} target={userData?.macroTargets.calories || 2500} color="#ffa500" />
           </div>
 
+          {/* Water Tracker */}
+          {(() => {
+            const waterGoal = userData?.waterGoal || 2000;
+            const waterIntake = getTodayWaterIntake();
+            const waterPercent = Math.min((waterIntake / waterGoal) * 100, 100);
+            const marks = [];
+            const step = 500;
+            for (let i = step; i < waterGoal; i += step) {
+              marks.push(i);
+            }
+
+            return (
+              <div style={{ marginBottom: '32px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#4fc3f7' }}>
+                    💧 Water
+                  </h2>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: waterIntake >= waterGoal ? '#00ff88' : '#4fc3f7' }}>
+                    {waterIntake}ml / {waterGoal}ml
+                  </span>
+                </div>
+
+                {/* Slider Track with marks */}
+                <div style={{ position: 'relative', marginBottom: '8px' }}>
+                  {/* Background Track */}
+                  <div style={{
+                    width: '100%',
+                    height: '10px',
+                    background: '#333',
+                    borderRadius: '5px',
+                    position: 'relative',
+                    overflow: 'visible'
+                  }}>
+                    {/* Fill */}
+                    <div style={{
+                      width: `${waterPercent}%`,
+                      height: '100%',
+                      background: waterIntake >= waterGoal
+                        ? 'linear-gradient(90deg, #4fc3f7, #00ff88)'
+                        : 'linear-gradient(90deg, #1565c0, #4fc3f7)',
+                      borderRadius: '5px',
+                      transition: 'width 0.3s ease'
+                    }} />
+
+                    {/* Progress Marks */}
+                    {marks.map(mark => {
+                      const markPercent = (mark / waterGoal) * 100;
+                      return (
+                        <div
+                          key={mark}
+                          style={{
+                            position: 'absolute',
+                            left: `${markPercent}%`,
+                            top: '-4px',
+                            transform: 'translateX(-50%)',
+                            width: '2px',
+                            height: '18px',
+                            background: waterIntake >= mark ? '#4fc3f7' : '#555',
+                            borderRadius: '1px',
+                            zIndex: 2
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {/* Slider Input (invisible but interactive) */}
+                  <input
+                    type="range"
+                    min="0"
+                    max={waterGoal}
+                    step="50"
+                    value={waterIntake}
+                    onChange={(e) => {
+                      const newVal = parseInt(e.target.value);
+                      const today = new Date().toISOString().split('T')[0];
+                      const updated = { ...waterTracker, [today]: newVal };
+                      setWaterTracker(updated);
+                      localStorage.setItem('forgeWaterTracker', JSON.stringify(updated));
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: '-4px',
+                      left: 0,
+                      width: '100%',
+                      height: '18px',
+                      opacity: 0,
+                      cursor: 'pointer',
+                      zIndex: 3,
+                      margin: 0
+                    }}
+                  />
+                </div>
+
+                {/* Mark Labels */}
+                <div style={{ position: 'relative', height: '18px' }}>
+                  {marks.map(mark => {
+                    const markPercent = (mark / waterGoal) * 100;
+                    return (
+                      <span
+                        key={mark}
+                        style={{
+                          position: 'absolute',
+                          left: `${markPercent}%`,
+                          transform: 'translateX(-50%)',
+                          fontSize: '10px',
+                          color: waterIntake >= mark ? '#4fc3f7' : '#555',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {mark >= 1000 ? `${mark / 1000}L` : `${mark}`}
+                      </span>
+                    );
+                  })}
+                  <span style={{
+                    position: 'absolute',
+                    right: 0,
+                    fontSize: '10px',
+                    color: waterIntake >= waterGoal ? '#00ff88' : '#555',
+                    fontWeight: 600
+                  }}>
+                    {waterGoal >= 1000 ? `${waterGoal / 1000}L` : `${waterGoal}`}
+                  </span>
+                </div>
+
+                {/* Status message */}
+                <p style={{
+                  fontSize: '12px',
+                  color: waterIntake >= waterGoal ? '#00ff88' : '#666',
+                  margin: '10px 0 0',
+                  textAlign: 'center'
+                }}>
+                  {waterIntake === 0
+                    ? 'Slide to log your water intake'
+                    : waterIntake >= waterGoal
+                    ? '🎉 Daily water goal reached!'
+                    : `${waterGoal - waterIntake}ml left to reach your goal`}
+                </p>
+              </div>
+            );
+          })()}
+
           {/* Today's Meals */}
           <div style={{ marginBottom: '24px' }}>
             <h2 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 16px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#00d9ff' }}>
@@ -826,21 +1292,129 @@ const ForgeApp = () => {
                   <div
                     key={meal.id}
                     style={{
-                      background: '#1a1a1a',
+                      background: editingMealId === meal.id ? '#222' : '#1a1a1a',
                       padding: '12px',
                       borderRadius: '6px',
-                      border: '1px solid #333',
+                      border: editingMealId === meal.id ? '1px solid #00d9ff' : '1px solid #333',
                       display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
+                      flexDirection: 'column',
+                      gap: '10px'
                     }}
                   >
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: '14px' }}>{meal.mealName}</p>
-                      <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#999' }}>
-                        {meal.calories} cal • P: {meal.protein}g • C: {meal.carbs}g • F: {meal.fat}g
-                      </p>
-                    </div>
+                    {editingMealId === meal.id ? (
+                      // Edit Mode
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <textarea
+                          value={editingMealInput}
+                          onChange={(e) => setEditingMealInput(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            background: '#1a1a1a',
+                            border: '1px solid #333',
+                            borderRadius: '4px',
+                            color: '#fff',
+                            fontSize: '13px',
+                            fontFamily: 'inherit',
+                            minHeight: '60px',
+                            boxSizing: 'border-box',
+                            resize: 'vertical'
+                          }}
+                        />
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={() => saveEditedMeal(meal.id)}
+                            style={{
+                              flex: 1,
+                              padding: '8px',
+                              background: '#00d9ff',
+                              color: '#000',
+                              border: 'none',
+                              borderRadius: '4px',
+                              fontWeight: 600,
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => e.target.style.background = '#00b8d4'}
+                            onMouseLeave={(e) => e.target.style.background = '#00d9ff'}
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEditMeal}
+                            style={{
+                              flex: 1,
+                              padding: '8px',
+                              background: '#333',
+                              color: '#999',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              fontWeight: 600,
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => { e.target.style.background = '#444'; e.target.style.color = '#fff'; }}
+                            onMouseLeave={(e) => { e.target.style.background = '#333'; e.target.style.color = '#999'; }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      // View Mode
+                      <>
+                        <div>
+                          <p style={{ margin: 0, fontWeight: 600, fontSize: '14px' }}>{meal.mealName}</p>
+                          <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#999' }}>
+                            {meal.calories} cal • P: {meal.protein}g • C: {meal.carbs}g • F: {meal.fat}g
+                          </p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={() => startEditingMeal(meal)}
+                            style={{
+                              flex: 1,
+                              padding: '6px',
+                              background: '#333',
+                              color: '#00d9ff',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              fontWeight: 600,
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              textTransform: 'uppercase'
+                            }}
+                            onMouseEnter={(e) => { e.target.style.background = '#444'; }}
+                            onMouseLeave={(e) => { e.target.style.background = '#333'; }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => deleteMeal(meal.id)}
+                            style={{
+                              flex: 1,
+                              padding: '6px',
+                              background: '#333',
+                              color: '#ff6b6b',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              fontWeight: 600,
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              textTransform: 'uppercase'
+                            }}
+                            onMouseEnter={(e) => { e.target.style.background = '#ff6b6b'; e.target.style.color = '#fff'; }}
+                            onMouseLeave={(e) => { e.target.style.background = '#333'; e.target.style.color = '#ff6b6b'; }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1142,7 +1716,7 @@ const ForgeApp = () => {
           <h2 style={{ fontSize: '14px', fontWeight: 600, margin: '0 0 16px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#00d9ff' }}>
             Daily protein
           </h2>
-          <div style={{ background: '#1a1a1a', padding: '16px', borderRadius: '6px', border: '1px solid #333', height: '300px' }}>
+          <div style={{ background: '#1a1a1a', padding: '16px', borderRadius: '6px', border: '1px solid #333', height: '300px', marginBottom: '32px' }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={progressData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" />
@@ -1155,6 +1729,25 @@ const ForgeApp = () => {
                 <Line type="monotone" dataKey="protein" stroke="#00ff88" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="proteinTarget" stroke="#333" strokeWidth={2} dot={false} strokeDasharray="5 5" />
               </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <h2 style={{ fontSize: '14px', fontWeight: 600, margin: '0 0 16px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#4fc3f7' }}>
+            💧 Daily water intake
+          </h2>
+          <div style={{ background: '#1a1a1a', padding: '16px', borderRadius: '6px', border: '1px solid #333', height: '300px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={progressData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#666' }} stroke="#333" />
+                <YAxis tick={{ fontSize: 11, fill: '#666' }} stroke="#333" />
+                <Tooltip
+                  contentStyle={{ background: '#222', border: '1px solid #333', borderRadius: '6px', color: '#fff' }}
+                  formatter={(value, name) => [`${Math.round(value)}ml`, name === 'water' ? 'Intake' : 'Goal']}
+                />
+                <Bar dataKey="water" fill="#4fc3f7" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="waterTarget" fill="#333" radius={[4, 4, 0, 0]} />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
