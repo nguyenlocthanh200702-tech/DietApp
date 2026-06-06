@@ -2,29 +2,14 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// List of models to try in order
 const MODELS_TO_TRY = [
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-3.1-pro",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-pro",
 ];
 
-async function tryCoachingWithModel(modelName, prompt) {
-  try {
-    const model = genAI.getGenerativeModel({ model: modelName });
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const advice = response.text();
-    console.log(`Successfully used model: ${modelName}`);
-    return advice;
-  } catch (error) {
-    console.log(`Model ${modelName} failed: ${error.message}`);
-    throw error;
-  }
-}
-
 export default async function handler(req, res) {
-  // Enable CORS
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
@@ -33,47 +18,69 @@ export default async function handler(req, res) {
     "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
   );
 
-  if (req.method === "OPTIONS") {
-    res.status(200).end();
-    return;
+  if (req.method === "OPTIONS") { res.status(200).end(); return; }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  const { messages, userProfile, mealSummary } = req.body;
+
+  if (!messages || !userProfile) {
+    return res.status(400).json({ error: "Messages and userProfile are required" });
   }
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  // Build system prompt with user context
+  const systemPrompt = `You are a knowledgeable, friendly fitness nutrition coach. You are chatting with ${userProfile.name}.
 
-  const { mealSummary, goal, macroTargets } = req.body;
+Their profile:
+- Goal: ${userProfile.goal === 'build-muscle' ? 'Build muscle' : userProfile.goal === 'lose-fat' ? 'Lose fat' : 'Maintain'}
+- Weight: ${userProfile.weight}kg
+- Daily macro targets: ${userProfile.macroTargets?.calories} cal, ${userProfile.macroTargets?.protein}g protein, ${userProfile.macroTargets?.carbs}g carbs, ${userProfile.macroTargets?.fat}g fat
+${userProfile.dietaryRestrictions ? `- Dietary restrictions: ${userProfile.dietaryRestrictions}` : ''}
 
-  if (!mealSummary) {
-    return res.status(400).json({ error: "Meal summary is required" });
-  }
+Their recent nutrition data (last 7 days):
+${mealSummary || 'No meal data yet'}
 
-  const prompt = `You are a supportive fitness coach. Analyze this person's nutrition data from the last 7 days and give brief, actionable advice.
+Rules for your responses:
+- Keep answers SHORT and DIRECT — 2 to 4 sentences max
+- Be warm and encouraging, not clinical or preachy
+- Give specific numbers when relevant (grams, calories)
+- Always keep their goal and dietary restrictions in mind
+- If they ask about substitutions, give a direct yes/no + brief reason
+- Never pad with unnecessary disclaimers
+- Always refer to them by name occasionally to keep it personal`;
 
-Their macro targets: ${macroTargets.calories} cal, ${macroTargets.protein}g protein, ${macroTargets.carbs}g carbs, ${macroTargets.fat}g fat per day
+  // Build conversation for Gemini
+  // Gemini uses "user" and "model" roles
+  const geminiHistory = messages.slice(0, -1).map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }));
 
-Their goal: ${goal === "build-muscle" ? "Build muscle" : goal === "lose-fat" ? "Lose fat" : "Maintain"}
+  const lastMessage = messages[messages.length - 1].content;
 
-Their data (last 7 days):
-${mealSummary || "No meal data yet"}
-
-Give 2-3 specific, encouraging observations and suggestions. Keep it friendly and motivating, not preachy. Format as plain text paragraphs. Be concise and actionable.`;
-
-  // Try each model until one works
   for (const modelName of MODELS_TO_TRY) {
     try {
-      const advice = await tryCoachingWithModel(modelName, prompt);
-      return res.status(200).json({ advice });
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction: systemPrompt
+      });
+
+      const chat = model.startChat({
+        history: geminiHistory
+      });
+
+      const result = await chat.sendMessage(lastMessage);
+      const reply = result.response.text();
+
+      console.log(`Chat reply via model: ${modelName}`);
+      return res.status(200).json({ reply });
     } catch (error) {
-      // Continue to next model
+      console.log(`Model ${modelName} failed: ${error.message}`);
       continue;
     }
   }
 
-  // If all models failed
-  console.error("All models failed");
   return res.status(500).json({
-    error: "Failed to get coaching advice with any available model",
-    details: "No compatible Gemini models found",
+    error: "Failed to get a response",
+    details: "No compatible Gemini models found"
   });
 }

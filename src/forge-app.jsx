@@ -12,6 +12,9 @@ const ForgeApp = () => {
   const [editingMealId, setEditingMealId] = useState(null);
   const [editingMealInput, setEditingMealInput] = useState('');
   const [waterTracker, setWaterTracker] = useState({});
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
 
   // Load data from localStorage
   useEffect(() => {
@@ -248,6 +251,74 @@ const ForgeApp = () => {
   };
 
   // Get progress chart data (last 30 days)
+  // Send a chat message to the AI coach
+  const sendChatMessage = async (userMessage) => {
+    if (!userMessage.trim()) return;
+
+    const newUserMsg = { role: 'user', content: userMessage };
+    const updatedMessages = [...chatMessages, newUserMsg];
+    setChatMessages(updatedMessages);
+    setChatInput('');
+    setChatLoading(true);
+
+    // Build context summary
+    const last7Days = meals.filter(m => {
+      const mealDate = new Date(m.timestamp);
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      return mealDate >= sevenDaysAgo;
+    });
+
+    const dailyData = {};
+    last7Days.forEach(meal => {
+      const date = meal.timestamp.split('T')[0];
+      if (!dailyData[date]) dailyData[date] = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+      dailyData[date].calories += meal.calories;
+      dailyData[date].protein += meal.protein;
+      dailyData[date].carbs += meal.carbs;
+      dailyData[date].fat += meal.fat;
+    });
+
+    const mealSummary = Object.entries(dailyData).map(([date, m]) =>
+      `${date}: ${m.calories}cal, ${m.protein}g protein, ${m.carbs}g carbs, ${m.fat}g fat`
+    ).join('\n') || 'No meal data yet';
+
+    // Build conversation history for context
+    const conversationHistory = updatedMessages.map(m => ({
+      role: m.role,
+      content: m.content
+    }));
+
+    try {
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'https://your-vercel-function.vercel.app';
+      const response = await fetch(`${backendUrl}/api/chat-coach`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: conversationHistory,
+          userProfile: {
+            name: userData.name,
+            goal: userData.goal,
+            weight: userData.weight,
+            macroTargets: userData.macroTargets,
+            dietaryRestrictions: userData.dietaryRestrictions
+          },
+          mealSummary
+        })
+      });
+
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      const data = await response.json();
+
+      setChatMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+    } catch (error) {
+      console.error('Chat error:', error);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I'm having trouble connecting right now. Try again in a moment!" }]);
+    }
+
+    setChatLoading(false);
+  };
+
   const getProgressData = () => {
     const data = {};
     const today = new Date();
@@ -1424,7 +1495,7 @@ const ForgeApp = () => {
               + Log Meal
             </button>
             <button
-              onClick={() => { generateCoachAdvice(); setScreen('coach'); }}
+              onClick={() => { setChatMessages([]); generateCoachAdvice(); setScreen('coach'); }}
               style={{
                 padding: '12px',
                 background: '#333',
@@ -1569,77 +1640,265 @@ const ForgeApp = () => {
   if (screen === 'coach') {
     return (
       <div style={{
-        minHeight: '100vh',
+        height: '100vh',
         background: '#0f0f0f',
         color: '#fff',
-        padding: '20px',
         fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
-        paddingBottom: '100px'
+        display: 'flex',
+        flexDirection: 'column',
+        maxWidth: '500px',
+        margin: '0 auto'
       }}>
-        <div style={{ maxWidth: '500px', margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid #222',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          flexShrink: 0
+        }}>
           <button
             onClick={() => setScreen('dashboard')}
+            style={{ background: 'none', border: 'none', color: '#00d9ff', cursor: 'pointer', fontSize: '14px', fontWeight: 600, padding: 0 }}
+          >
+            ←
+          </button>
+          <div>
+            <h1 style={{ fontSize: '18px', margin: 0, fontWeight: 700 }}>AI Coach</h1>
+            <p style={{ fontSize: '11px', color: '#666', margin: 0 }}>Ask me anything about your nutrition</p>
+          </div>
+          <button
+            onClick={() => {
+              setChatMessages([]);
+              setCoachAdvice('');
+              generateCoachAdvice();
+            }}
             style={{
-              background: 'none',
-              border: 'none',
-              color: '#00d9ff',
-              cursor: 'pointer',
-              fontSize: '14px',
-              marginBottom: '24px',
-              fontWeight: 600
+              marginLeft: 'auto',
+              padding: '6px 12px',
+              background: '#222',
+              color: '#999',
+              border: '1px solid #333',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer'
             }}
           >
-            ← Back
+            Refresh
           </button>
+        </div>
 
-          <h1 style={{ fontSize: '24px', margin: '0 0 24px', fontWeight: 700 }}>Your AI Coach</h1>
-
-          {coachLoading ? (
-            <div style={{
-              background: '#1a1a1a',
-              padding: '24px',
-              borderRadius: '6px',
-              border: '1px solid #333',
-              textAlign: 'center',
-              color: '#999'
-            }}>
-              <p style={{ margin: 0 }}>Analyzing your nutrition data...</p>
+        {/* Messages */}
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '16px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          {/* Initial analysis message */}
+          {coachLoading && chatMessages.length === 0 ? (
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+              <div style={{
+                width: '32px', height: '32px', borderRadius: '50%',
+                background: 'linear-gradient(135deg, #00d9ff, #00ff88)',
+                flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '14px'
+              }}>💪</div>
+              <div style={{
+                background: '#1a1a1a', border: '1px solid #333',
+                borderRadius: '12px 12px 12px 2px', padding: '12px 14px',
+                maxWidth: '80%', fontSize: '14px', color: '#999'
+              }}>
+                Analyzing your nutrition...
+              </div>
             </div>
-          ) : coachAdvice ? (
-            <div style={{
-              background: '#1a1a1a',
-              padding: '20px',
-              borderRadius: '6px',
-              border: '1px solid #333',
-              lineHeight: '1.6',
-              fontSize: '14px',
-              whiteSpace: 'pre-wrap'
-            }}>
-              {coachAdvice}
+          ) : coachAdvice && chatMessages.length === 0 ? (
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+              <div style={{
+                width: '32px', height: '32px', borderRadius: '50%',
+                background: 'linear-gradient(135deg, #00d9ff, #00ff88)',
+                flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '14px'
+              }}>💪</div>
+              <div style={{
+                background: '#1a1a1a', border: '1px solid #333',
+                borderRadius: '12px 12px 12px 2px', padding: '12px 14px',
+                maxWidth: '85%', fontSize: '14px', lineHeight: '1.6', whiteSpace: 'pre-wrap'
+              }}>
+                {coachAdvice}
+              </div>
             </div>
-          ) : (
-            <p style={{ color: '#666', fontSize: '14px' }}>Log some meals first, then ask for personalized advice!</p>
-          )}
+          ) : !coachAdvice && chatMessages.length === 0 ? (
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+              <div style={{
+                width: '32px', height: '32px', borderRadius: '50%',
+                background: 'linear-gradient(135deg, #00d9ff, #00ff88)',
+                flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '14px'
+              }}>💪</div>
+              <div style={{
+                background: '#1a1a1a', border: '1px solid #333',
+                borderRadius: '12px 12px 12px 2px', padding: '12px 14px',
+                maxWidth: '85%', fontSize: '14px', lineHeight: '1.6', color: '#999'
+              }}>
+                Hey {userData?.name}! Log some meals and I'll analyze your nutrition. You can also ask me anything about your diet right now!
+              </div>
+            </div>
+          ) : null}
 
-          {coachAdvice && (
-            <button
-              onClick={() => { generateCoachAdvice(); }}
+          {/* Chat messages */}
+          {chatMessages.map((msg, idx) => (
+            <div
+              key={idx}
               style={{
-                width: '100%',
-                padding: '12px',
-                background: '#333',
-                color: '#fff',
-                border: '1px solid #444',
-                borderRadius: '6px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontSize: '12px',
-                marginTop: '16px'
+                display: 'flex',
+                gap: '10px',
+                alignItems: 'flex-start',
+                flexDirection: msg.role === 'user' ? 'row-reverse' : 'row'
               }}
             >
-              Get Fresh Advice
-            </button>
+              {msg.role === 'assistant' && (
+                <div style={{
+                  width: '32px', height: '32px', borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #00d9ff, #00ff88)',
+                  flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '14px'
+                }}>💪</div>
+              )}
+              <div style={{
+                background: msg.role === 'user' ? '#00d9ff' : '#1a1a1a',
+                color: msg.role === 'user' ? '#000' : '#fff',
+                border: msg.role === 'user' ? 'none' : '1px solid #333',
+                borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                padding: '10px 14px',
+                maxWidth: '80%',
+                fontSize: '14px',
+                lineHeight: '1.6',
+                whiteSpace: 'pre-wrap'
+              }}>
+                {msg.content}
+              </div>
+            </div>
+          ))}
+
+          {/* Loading bubble */}
+          {chatLoading && (
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+              <div style={{
+                width: '32px', height: '32px', borderRadius: '50%',
+                background: 'linear-gradient(135deg, #00d9ff, #00ff88)',
+                flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '14px'
+              }}>💪</div>
+              <div style={{
+                background: '#1a1a1a', border: '1px solid #333',
+                borderRadius: '12px 12px 12px 2px', padding: '12px 14px',
+                fontSize: '14px', color: '#666'
+              }}>
+                Thinking...
+              </div>
+            </div>
           )}
+        </div>
+
+        {/* Suggested questions (show only when no chat yet) */}
+        {chatMessages.length === 0 && !chatLoading && (
+          <div style={{
+            padding: '0 20px 12px',
+            display: 'flex',
+            gap: '8px',
+            overflowX: 'auto',
+            flexShrink: 0
+          }}>
+            {[
+              'What should I eat post-workout?',
+              'Am I eating enough protein?',
+              'Best snack before bed?',
+              'How to hit my carb goal?'
+            ].map((q, i) => (
+              <button
+                key={i}
+                onClick={() => sendChatMessage(q)}
+                style={{
+                  padding: '7px 12px',
+                  background: '#1a1a1a',
+                  color: '#00d9ff',
+                  border: '1px solid #00d9ff33',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Input Bar */}
+        <div style={{
+          padding: '12px 20px',
+          borderTop: '1px solid #222',
+          display: 'flex',
+          gap: '10px',
+          alignItems: 'flex-end',
+          flexShrink: 0,
+          background: '#0f0f0f'
+        }}>
+          <textarea
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!chatLoading && chatInput.trim()) sendChatMessage(chatInput);
+              }
+            }}
+            placeholder="Ask your coach anything..."
+            rows={1}
+            style={{
+              flex: 1,
+              padding: '10px 14px',
+              background: '#1a1a1a',
+              border: '1px solid #333',
+              borderRadius: '20px',
+              color: '#fff',
+              fontSize: '14px',
+              fontFamily: 'inherit',
+              resize: 'none',
+              outline: 'none',
+              lineHeight: '1.4',
+              maxHeight: '80px',
+              overflowY: 'auto'
+            }}
+          />
+          <button
+            onClick={() => { if (!chatLoading && chatInput.trim()) sendChatMessage(chatInput); }}
+            disabled={chatLoading || !chatInput.trim()}
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              background: chatInput.trim() && !chatLoading ? '#00d9ff' : '#333',
+              color: chatInput.trim() && !chatLoading ? '#000' : '#666',
+              border: 'none',
+              cursor: chatInput.trim() && !chatLoading ? 'pointer' : 'default',
+              fontSize: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              transition: 'all 0.2s'
+            }}
+          >
+            ↑
+          </button>
         </div>
       </div>
     );
