@@ -1,12 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import AuthScreen from './components/AuthScreen';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { getDisplayUsername } from './lib/authHelpers';
+import {
+  fetchProfile,
+  saveProfile,
+  deleteProfile,
+  fetchMeals,
+  insertMeal,
+  updateMeal as updateMealInDb,
+  deleteMeal as deleteMealFromDb,
+  fetchWaterTracker,
+  upsertWaterLog,
+  deleteAllMeals,
+  deleteAllWaterLogs,
+  importLocalStorageData
+} from './lib/dataService';
 
 const ForgeApp = () => {
+  const [authUser, setAuthUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
   const [screen, setScreen] = useState('onboarding'); // onboarding, onboarding-macros, dashboard, log-meal, coach, progress, settings
   const [onboardingStep, setOnboardingStep] = useState(1); // 1: profile, 2: macro choice, 3: manual macros
+  const [onboardingProfile, setOnboardingProfile] = useState(null);
   const [userData, setUserData] = useState(null);
   const [meals, setMeals] = useState([]);
   const [mealInput, setMealInput] = useState('');
+  const [logMealMode, setLogMealMode] = useState('ai'); // 'ai' | 'manual'
+  const [manualMeal, setManualMeal] = useState({
+    name: '',
+    calories: '',
+    protein: '',
+    carbs: '',
+    fat: ''
+  });
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachAdvice, setCoachAdvice] = useState('');
   const [editingMealId, setEditingMealId] = useState(null);
@@ -16,29 +45,67 @@ const ForgeApp = () => {
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
 
-  // Load data from localStorage
+  const loadUserData = async (userId) => {
+    setDataLoading(true);
+    try {
+      let profile = await fetchProfile(userId);
+
+      if (!profile && (localStorage.getItem('forgeUserData') || localStorage.getItem('forgeMeals'))) {
+        await importLocalStorageData(userId);
+        profile = await fetchProfile(userId);
+      }
+
+      const [mealsData, waterData] = await Promise.all([
+        fetchMeals(userId),
+        fetchWaterTracker(userId)
+      ]);
+
+      setMeals(mealsData);
+      setWaterTracker(waterData);
+
+      if (profile) {
+        setUserData(profile);
+        setScreen('dashboard');
+      } else {
+        setUserData(null);
+        setOnboardingStep(1);
+        setScreen('onboarding');
+      }
+    } catch (error) {
+      console.error('Failed to load user data:', error);
+      alert('Failed to load your data. Please refresh and try again.');
+    } finally {
+      setDataLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const saved = localStorage.getItem('forgeUserData');
-    const savedMeals = localStorage.getItem('forgeMeals');
-    const savedWater = localStorage.getItem('forgeWaterTracker');
-    if (saved) {
-      setUserData(JSON.parse(saved));
-      setScreen('dashboard');
+    if (!isSupabaseConfigured) {
+      setAuthLoading(false);
+      return;
     }
-    if (savedMeals) {
-      setMeals(JSON.parse(savedMeals));
-    }
-    if (savedWater) {
-      setWaterTracker(JSON.parse(savedWater));
-    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAuthUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  // Save meals to localStorage whenever they change
   useEffect(() => {
-    if (meals.length > 0) {
-      localStorage.setItem('forgeMeals', JSON.stringify(meals));
+    if (authUser) {
+      loadUserData(authUser.id);
+    } else if (!authLoading) {
+      setUserData(null);
+      setMeals([]);
+      setWaterTracker({});
     }
-  }, [meals]);
+  }, [authUser, authLoading]);
 
   // Calculate macro targets based on user data
   const calculateMacroTargets = (weight, height, age, goal, activityLevel) => {
@@ -107,7 +174,32 @@ const ForgeApp = () => {
     }
   };
 
-  // Handle meal logging
+  const addMeal = async (meal) => {
+    if (!authUser) return;
+    try {
+      const saved = await insertMeal(authUser.id, meal);
+      setMeals(prev => [saved, ...prev]);
+    } catch (error) {
+      console.error('Failed to save meal:', error);
+      alert('Failed to save meal. Please try again.');
+    }
+  };
+
+  const completeOnboarding = async (profileData) => {
+    if (!authUser) return;
+    try {
+      await saveProfile(authUser.id, profileData);
+      setUserData(profileData);
+      setOnboardingProfile(null);
+      setOnboardingStep(1);
+      setScreen('dashboard');
+    } catch (error) {
+      console.error('Failed to save profile:', error);
+      alert('Failed to save your profile. Please try again.');
+    }
+  };
+
+  // Handle meal logging via AI estimation
   const handleLogMeal = async (e) => {
     e.preventDefault();
     if (!mealInput.trim()) return;
@@ -115,20 +207,46 @@ const ForgeApp = () => {
     const macros = await estimateMealMacros(mealInput);
     
     if (macros) {
-      const newMeal = {
-        id: Date.now(),
-        timestamp: new Date().toISOString(),
-        description: mealInput,
+    addMeal({
+      timestamp: new Date().toISOString(),
+      description: mealInput,
         mealName: macros.mealName || 'Meal',
         calories: macros.calories,
         protein: macros.protein,
         carbs: macros.carbs,
         fat: macros.fat
-      };
+      });
       
-      setMeals([...meals, newMeal]);
       setMealInput('');
     }
+  };
+
+  const handleLogManualMeal = (e) => {
+    e.preventDefault();
+
+    const name = manualMeal.name.trim();
+    const calories = parseInt(manualMeal.calories, 10);
+    const protein = parseInt(manualMeal.protein, 10);
+    const carbs = parseInt(manualMeal.carbs, 10);
+    const fat = parseInt(manualMeal.fat, 10);
+
+    if (!name) return;
+    if ([calories, protein, carbs, fat].some(v => isNaN(v) || v < 0)) {
+      alert('Please enter valid macro values (0 or greater).');
+      return;
+    }
+
+    addMeal({
+      timestamp: new Date().toISOString(),
+      description: name,
+      mealName: name,
+      calories,
+      protein,
+      carbs,
+      fat
+    });
+
+    setManualMeal({ name: '', calories: '', protein: '', carbs: '', fat: '' });
   };
 
   // Get today's water intake
@@ -151,8 +269,15 @@ const ForgeApp = () => {
   };
 
   // Delete a meal
-  const deleteMeal = (mealId) => {
-    setMeals(meals.filter(m => m.id !== mealId));
+  const deleteMeal = async (mealId) => {
+    if (!authUser) return;
+    try {
+      await deleteMealFromDb(authUser.id, mealId);
+      setMeals(meals.filter(m => m.id !== mealId));
+    } catch (error) {
+      console.error('Failed to delete meal:', error);
+      alert('Failed to delete meal. Please try again.');
+    }
   };
 
   // Start editing a meal
@@ -174,23 +299,29 @@ const ForgeApp = () => {
     // Re-estimate macros for the new description
     const macros = await estimateMealMacros(editingMealInput);
     
-    if (macros) {
-      setMeals(meals.map(m => 
-        m.id === mealId 
-          ? {
-              ...m,
-              description: editingMealInput,
-              mealName: macros.mealName || 'Meal',
-              calories: macros.calories,
-              protein: macros.protein,
-              carbs: macros.carbs,
-              fat: macros.fat
-            }
-          : m
-      ));
-      
-      setEditingMealId(null);
-      setEditingMealInput('');
+    if (macros && authUser) {
+      const existing = meals.find(m => m.id === mealId);
+      if (!existing) return;
+
+      const updated = {
+        ...existing,
+        description: editingMealInput,
+        mealName: macros.mealName || 'Meal',
+        calories: macros.calories,
+        protein: macros.protein,
+        carbs: macros.carbs,
+        fat: macros.fat
+      };
+
+      try {
+        const saved = await updateMealInDb(authUser.id, updated);
+        setMeals(meals.map(m => m.id === mealId ? saved : m));
+        setEditingMealId(null);
+        setEditingMealInput('');
+      } catch (error) {
+        console.error('Failed to update meal:', error);
+        alert('Failed to update meal. Please try again.');
+      }
     }
   };
 
@@ -412,6 +543,52 @@ const ForgeApp = () => {
     );
   };
 
+  const loadingScreen = (
+    <div style={{
+      minHeight: '100vh',
+      background: '#0f0f0f',
+      color: '#999',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif'
+    }}>
+      Loading...
+    </div>
+  );
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: '#0f0f0f',
+        color: '#fff',
+        padding: '40px 20px',
+        fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <div style={{ maxWidth: '480px', textAlign: 'center' }}>
+          <h1 style={{ color: '#00d9ff', marginBottom: '12px' }}>Supabase not configured</h1>
+          <p style={{ color: '#999', lineHeight: 1.6 }}>
+            Add <code style={{ color: '#fff' }}>REACT_APP_SUPABASE_URL</code> and{' '}
+            <code style={{ color: '#fff' }}>REACT_APP_SUPABASE_ANON_KEY</code> to your <code style={{ color: '#fff' }}>.env</code> file,
+            then run the SQL in <code style={{ color: '#fff' }}>supabase/schema.sql</code> in your Supabase project.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authLoading || (authUser && dataLoading)) {
+    return loadingScreen;
+  }
+
+  if (!authUser) {
+    return <AuthScreen />;
+  }
+
   // Screens
   if (screen === 'onboarding') {
     // Step 1: Profile Information
@@ -436,7 +613,7 @@ const ForgeApp = () => {
             <form onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.target);
-              localStorage.setItem('forgeProfileData', JSON.stringify({
+              setOnboardingProfile({
                 name: formData.get('name'),
                 weight: parseFloat(formData.get('weight')),
                 height: parseFloat(formData.get('height')),
@@ -444,7 +621,7 @@ const ForgeApp = () => {
                 goal: formData.get('goal'),
                 activityLevel: formData.get('activity'),
                 dietaryRestrictions: formData.get('restrictions'),
-              }));
+              });
               setOnboardingStep(2);
             }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
@@ -655,25 +832,20 @@ const ForgeApp = () => {
               {/* Auto Calculate Option */}
               <div
                 onClick={() => {
-                  const profileData = JSON.parse(localStorage.getItem('forgeProfileData'));
                   const macroTargets = calculateMacroTargets(
-                    profileData.weight,
-                    profileData.height,
-                    profileData.age,
-                    profileData.goal,
-                    profileData.activityLevel
+                    onboardingProfile.weight,
+                    onboardingProfile.height,
+                    onboardingProfile.age,
+                    onboardingProfile.goal,
+                    onboardingProfile.activityLevel
                   );
                   
-                  const newUserData = {
-                    ...profileData,
+                  setUserData({
+                    ...onboardingProfile,
                     macroTargets,
                     createdAt: new Date().toISOString()
-                  };
-                  
-                  localStorage.setItem('forgeUserData', JSON.stringify(newUserData));
-                  localStorage.removeItem('forgeProfileData');
-                  setUserData(newUserData);
-                  setOnboardingStep(4); // Go to water setup
+                  });
+                  setOnboardingStep(4);
                 }}
                 style={{
                   padding: '20px',
@@ -773,10 +945,8 @@ const ForgeApp = () => {
             <form onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.target);
-              const profileData = JSON.parse(localStorage.getItem('forgeProfileData'));
-              
-              const newUserData = {
-                ...profileData,
+              setUserData({
+                ...onboardingProfile,
                 macroTargets: {
                   calories: parseInt(formData.get('calories')),
                   protein: parseInt(formData.get('protein')),
@@ -784,12 +954,8 @@ const ForgeApp = () => {
                   fat: parseInt(formData.get('fat'))
                 },
                 createdAt: new Date().toISOString()
-              };
-
-              localStorage.setItem('forgeUserData', JSON.stringify(newUserData));
-              localStorage.removeItem('forgeProfileData');
-              setUserData(newUserData);
-              setOnboardingStep(4); // Go to water setup
+              });
+              setOnboardingStep(4);
             }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '12px', color: '#ffa500', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
@@ -955,15 +1121,12 @@ const ForgeApp = () => {
               {/* Auto Calculate Option */}
               <div
                 onClick={() => {
-                  const savedUser = JSON.parse(localStorage.getItem('forgeUserData'));
-                  // Auto water goal: standard 2000ml recommendation
-                  const waterGoal = Math.round((savedUser.weight || 70) * 35 / 100) * 100;
-                  savedUser.waterGoal = Math.max(waterGoal, 2000);
-                  savedUser.bottleSize = 2000;
-                  localStorage.setItem('forgeUserData', JSON.stringify(savedUser));
-                  setUserData(savedUser);
-                  setOnboardingStep(1);
-                  setScreen('dashboard');
+                  const waterGoal = Math.round((userData.weight || 70) * 35 / 100) * 100;
+                  completeOnboarding({
+                    ...userData,
+                    waterGoal: Math.max(waterGoal, 2000),
+                    bottleSize: 2000
+                  });
                 }}
                 style={{
                   padding: '20px',
@@ -1063,15 +1226,11 @@ const ForgeApp = () => {
             <form onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.target);
-              const savedUser = JSON.parse(localStorage.getItem('forgeUserData'));
-              
-              savedUser.waterGoal = parseInt(formData.get('waterGoal'));
-              savedUser.bottleSize = parseInt(formData.get('bottleSize'));
-              
-              localStorage.setItem('forgeUserData', JSON.stringify(savedUser));
-              setUserData(savedUser);
-              setOnboardingStep(1);
-              setScreen('dashboard');
+              completeOnboarding({
+                ...userData,
+                waterGoal: parseInt(formData.get('waterGoal')),
+                bottleSize: parseInt(formData.get('bottleSize'))
+              });
             }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '12px', color: '#4fc3f7', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
@@ -1280,12 +1439,18 @@ const ForgeApp = () => {
                     max={waterGoal}
                     step="50"
                     value={waterIntake}
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const newVal = parseInt(e.target.value);
                       const today = new Date().toISOString().split('T')[0];
                       const updated = { ...waterTracker, [today]: newVal };
                       setWaterTracker(updated);
-                      localStorage.setItem('forgeWaterTracker', JSON.stringify(updated));
+                      if (authUser) {
+                        try {
+                          await upsertWaterLog(authUser.id, today, newVal);
+                        } catch (error) {
+                          console.error('Failed to save water intake:', error);
+                        }
+                      }
                     }}
                     style={{
                       position: 'absolute',
@@ -1599,57 +1764,233 @@ const ForgeApp = () => {
             ← Back
           </button>
 
-          <h1 style={{ fontSize: '24px', margin: '0 0 24px', fontWeight: 700 }}>Log a meal</h1>
+          <h1 style={{ fontSize: '24px', margin: '0 0 16px', fontWeight: 700 }}>Log a meal</h1>
 
-          <form onSubmit={handleLogMeal}>
-            <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '8px', letterSpacing: '0.5px' }}>
-              Describe your meal
-            </label>
-            <textarea
-              value={mealInput}
-              onChange={(e) => setMealInput(e.target.value)}
-              placeholder="e.g., 2 eggs, a bowl of brown rice, 150g grilled chicken, olive oil"
-              style={{
-                width: '100%',
-                padding: '14px',
-                background: '#1a1a1a',
-                border: '1px solid #333',
-                borderRadius: '6px',
-                color: '#fff',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-                fontFamily: 'inherit',
-                minHeight: '100px',
-                resize: 'vertical'
-              }}
-            />
-            <p style={{ fontSize: '12px', color: '#666', margin: '8px 0 0' }}>
-              Be specific about portions (e.g., "cup", "100g", "large", "2 slices")
-            </p>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
+            {[
+              { id: 'ai', label: 'AI Estimate' },
+              { id: 'manual', label: 'Enter Macros' }
+            ].map(mode => (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => setLogMealMode(mode.id)}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  background: logMealMode === mode.id ? '#00d9ff' : '#1a1a1a',
+                  color: logMealMode === mode.id ? '#000' : '#999',
+                  border: `1px solid ${logMealMode === mode.id ? '#00d9ff' : '#333'}`,
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
 
-            <button
-              type="submit"
-              style={{
-                width: '100%',
-                padding: '14px',
-                background: '#00d9ff',
-                color: '#000',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '14px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                marginTop: '20px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => e.target.style.background = '#00b8d4'}
-              onMouseLeave={(e) => e.target.style.background = '#00d9ff'}
-            >
-              Analyze & Log
-            </button>
-          </form>
+          {logMealMode === 'ai' ? (
+            <form onSubmit={handleLogMeal}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '8px', letterSpacing: '0.5px' }}>
+                Describe your meal
+              </label>
+              <textarea
+                value={mealInput}
+                onChange={(e) => setMealInput(e.target.value)}
+                placeholder="e.g., 2 eggs, a bowl of brown rice, 150g grilled chicken, olive oil"
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  background: '#1a1a1a',
+                  border: '1px solid #333',
+                  borderRadius: '6px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  boxSizing: 'border-box',
+                  fontFamily: 'inherit',
+                  minHeight: '100px',
+                  resize: 'vertical'
+                }}
+              />
+              <p style={{ fontSize: '12px', color: '#666', margin: '8px 0 0' }}>
+                Be specific about portions (e.g., "cup", "100g", "large", "2 slices")
+              </p>
+
+              <button
+                type="submit"
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  background: '#00d9ff',
+                  color: '#000',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginTop: '20px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#00b8d4'}
+                onMouseLeave={(e) => e.target.style.background = '#00d9ff'}
+              >
+                Analyze & Log
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleLogManualMeal} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Meal name
+                </label>
+                <input
+                  type="text"
+                  value={manualMeal.name}
+                  onChange={(e) => setManualMeal({ ...manualMeal, name: e.target.value })}
+                  placeholder="e.g., Post-workout shake"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#1a1a1a',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#ffa500', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Calories
+                </label>
+                <input
+                  type="number"
+                  value={manualMeal.calories}
+                  onChange={(e) => setManualMeal({ ...manualMeal, calories: e.target.value })}
+                  placeholder="e.g., 450"
+                  required
+                  min="0"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#1a1a1a',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Protein (g)
+                </label>
+                <input
+                  type="number"
+                  value={manualMeal.protein}
+                  onChange={(e) => setManualMeal({ ...manualMeal, protein: e.target.value })}
+                  placeholder="e.g., 35"
+                  required
+                  min="0"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#1a1a1a',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#00ff88', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Carbs (g)
+                </label>
+                <input
+                  type="number"
+                  value={manualMeal.carbs}
+                  onChange={(e) => setManualMeal({ ...manualMeal, carbs: e.target.value })}
+                  placeholder="e.g., 40"
+                  required
+                  min="0"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#1a1a1a',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#ff6b6b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', letterSpacing: '0.5px' }}>
+                  Fat (g)
+                </label>
+                <input
+                  type="number"
+                  value={manualMeal.fat}
+                  onChange={(e) => setManualMeal({ ...manualMeal, fat: e.target.value })}
+                  placeholder="e.g., 12"
+                  required
+                  min="0"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#1a1a1a',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <p style={{ fontSize: '12px', color: '#666', margin: 0 }}>
+                Macros are added directly to today's progress — no AI needed.
+              </p>
+
+              <button
+                type="submit"
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  background: '#00d9ff',
+                  color: '#000',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#00b8d4'}
+                onMouseLeave={(e) => e.target.style.background = '#00d9ff'}
+              >
+                Log Meal
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
@@ -2044,6 +2385,40 @@ const ForgeApp = () => {
 
           <h1 style={{ fontSize: '24px', margin: '0 0 32px', fontWeight: '700' }}>Settings</h1>
 
+          {/* Account */}
+          <div style={{ marginBottom: '32px' }}>
+            <h2 style={{ fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: '600', marginBottom: '16px', letterSpacing: '0.5px' }}>
+              Account
+            </h2>
+            <div style={{
+              background: '#1a1a1a',
+              padding: '16px',
+              borderRadius: '6px',
+              border: '1px solid #333',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}>
+              <p style={{ fontSize: '14px', margin: 0, color: '#ccc' }}>@{getDisplayUsername(authUser)}</p>
+              <button
+                onClick={() => supabase.auth.signOut()}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: '#222',
+                  color: '#fff',
+                  border: '1px solid #444',
+                  borderRadius: '6px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+
           {/* Current Profile */}
           <div style={{ marginBottom: '32px' }}>
             <h2 style={{ fontSize: '12px', color: '#00d9ff', textTransform: 'uppercase', fontWeight: '600', marginBottom: '16px', letterSpacing: '0.5px' }}>
@@ -2168,10 +2543,17 @@ const ForgeApp = () => {
             </h2>
             
             <button
-              onClick={() => {
-                localStorage.removeItem('forgeUserData');
-                setUserData(null);
-                setScreen('onboarding');
+              onClick={async () => {
+                if (!authUser) return;
+                try {
+                  await deleteProfile(authUser.id);
+                  setUserData(null);
+                  setOnboardingStep(1);
+                  setScreen('onboarding');
+                } catch (error) {
+                  console.error('Failed to reset profile:', error);
+                  alert('Failed to reset profile. Please try again.');
+                }
               }}
               style={{
                 width: '100%',
@@ -2199,13 +2581,24 @@ const ForgeApp = () => {
             </p>
 
             <button
-              onClick={() => {
+              onClick={async () => {
+                if (!authUser) return;
                 if (window.confirm('Delete all data? This cannot be undone.')) {
-                  localStorage.removeItem('forgeUserData');
-                  localStorage.removeItem('forgeMeals');
-                  setUserData(null);
-                  setMeals([]);
-                  setScreen('onboarding');
+                  try {
+                    await Promise.all([
+                      deleteAllMeals(authUser.id),
+                      deleteAllWaterLogs(authUser.id),
+                      deleteProfile(authUser.id)
+                    ]);
+                    setUserData(null);
+                    setMeals([]);
+                    setWaterTracker({});
+                    setOnboardingStep(1);
+                    setScreen('onboarding');
+                  } catch (error) {
+                    console.error('Failed to delete data:', error);
+                    alert('Failed to delete data. Please try again.');
+                  }
                 }
               }}
               style={{
