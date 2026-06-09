@@ -2318,7 +2318,7 @@ const ForgeApp = () => {
               <BarChart data={progressData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#666' }} stroke="#333" />
-                <YAxis tick={{ fontSize: 11, fill: '#666' }} stroke="#333" />
+                <YAxis domain={[0, 1500]} tick={{ fontSize: 11, fill: '#666' }} stroke="#333" />
                 <Tooltip
                   contentStyle={{ background: '#222', border: '1px solid #333', borderRadius: '6px', color: '#fff' }}
                   formatter={(value) => Math.round(value)}
