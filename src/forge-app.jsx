@@ -4,6 +4,13 @@ import AuthScreen from './components/AuthScreen';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { getDisplayUsername } from './lib/authHelpers';
 import {
+  getTodayKey,
+  getMealDateKey,
+  isTodayInAppTz,
+  getLastNDaysKeys,
+  isWithinLastDaysInAppTz
+} from './lib/dateUtils';
+import {
   fetchProfile,
   saveProfile,
   deleteProfile,
@@ -44,6 +51,23 @@ const ForgeApp = () => {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [currentDayKey, setCurrentDayKey] = useState(() => getTodayKey());
+
+  // Re-render when the calendar day changes in UTC+7 (midnight Bangkok/Hanoi/Jakarta)
+  useEffect(() => {
+    const syncDay = () => {
+      const today = getTodayKey();
+      setCurrentDayKey(prev => (prev !== today ? today : prev));
+    };
+
+    syncDay();
+    const interval = setInterval(syncDay, 60 * 1000);
+    window.addEventListener('focus', syncDay);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', syncDay);
+    };
+  }, []);
 
   const loadUserData = async (userId) => {
     setDataLoading(true);
@@ -249,16 +273,14 @@ const ForgeApp = () => {
     setManualMeal({ name: '', calories: '', protein: '', carbs: '', fat: '' });
   };
 
-  // Get today's water intake
+  // Get today's water intake (resets at midnight UTC+7)
   const getTodayWaterIntake = () => {
-    const today = new Date().toISOString().split('T')[0];
-    return waterTracker[today] || 0;
+    return waterTracker[currentDayKey] || 0;
   };
 
-  // Get today's totals
+  // Get today's totals (resets at midnight UTC+7)
   const getTodayTotals = () => {
-    const today = new Date().toISOString().split('T')[0];
-    const todayMeals = meals.filter(m => m.timestamp.split('T')[0] === today);
+    const todayMeals = meals.filter(m => isTodayInAppTz(m.timestamp));
     
     return {
       calories: todayMeals.reduce((sum, m) => sum + m.calories, 0),
@@ -326,21 +348,17 @@ const ForgeApp = () => {
   };
 
   const buildCoachMealContext = (macroTargets) => {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    sevenDaysAgo.setHours(0, 0, 0, 0);
-
-    const recentMeals = meals.filter(m => new Date(m.timestamp) >= sevenDaysAgo);
+    const recentMeals = meals.filter(m => isWithinLastDaysInAppTz(m.timestamp, 7));
     if (recentMeals.length === 0) {
       return 'No meals logged in the last 7 days.';
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = currentDayKey;
     const dailyMeals = {};
     const dailyTotals = {};
 
     recentMeals.forEach(meal => {
-      const date = meal.timestamp.split('T')[0];
+      const date = getMealDateKey(meal.timestamp);
       if (!dailyMeals[date]) dailyMeals[date] = [];
       if (!dailyTotals[date]) dailyTotals[date] = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
@@ -471,12 +489,9 @@ const ForgeApp = () => {
 
   const getProgressData = () => {
     const data = {};
-    const today = new Date();
-    
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
+    const monthKeys = getLastNDaysKeys(30);
+
+    monthKeys.forEach(dateStr => {
       data[dateStr] = {
         date: dateStr,
         calories: 0,
@@ -488,10 +503,10 @@ const ForgeApp = () => {
         water: waterTracker[dateStr] || 0,
         waterTarget: userData?.waterGoal || 2000
       };
-    }
-    
+    });
+
     meals.forEach(meal => {
-      const dateStr = meal.timestamp.split('T')[0];
+      const dateStr = getMealDateKey(meal.timestamp);
       if (data[dateStr]) {
         data[dateStr].calories += meal.calories;
         data[dateStr].protein += meal.protein;
@@ -499,8 +514,8 @@ const ForgeApp = () => {
         data[dateStr].fat += meal.fat;
       }
     });
-    
-    return Object.values(data);
+
+    return monthKeys.map(key => data[key]);
   };
 
   const todayTotals = getTodayTotals();
@@ -1441,7 +1456,7 @@ const ForgeApp = () => {
                     value={waterIntake}
                     onChange={async (e) => {
                       const newVal = parseInt(e.target.value);
-                      const today = new Date().toISOString().split('T')[0];
+                      const today = currentDayKey;
                       const updated = { ...waterTracker, [today]: newVal };
                       setWaterTracker(updated);
                       if (authUser) {
@@ -1521,11 +1536,11 @@ const ForgeApp = () => {
               Today's meals
             </h2>
             
-            {meals.filter(m => m.timestamp.split('T')[0] === new Date().toISOString().split('T')[0]).length === 0 ? (
+            {meals.filter(m => isTodayInAppTz(m.timestamp)).length === 0 ? (
               <p style={{ color: '#666', fontSize: '14px', margin: 0 }}>No meals logged yet today</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {meals.filter(m => m.timestamp.split('T')[0] === new Date().toISOString().split('T')[0]).map(meal => (
+                {meals.filter(m => isTodayInAppTz(m.timestamp)).map(meal => (
                   <div
                     key={meal.id}
                     style={{
