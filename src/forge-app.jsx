@@ -8,6 +8,8 @@ import {
   getMealDateKey,
   isTodayInAppTz,
   getLastNDaysKeys,
+  getCurrentWeekKeys,
+  getWeekdayLabel,
   isWithinLastDaysInAppTz
 } from './lib/dateUtils';
 import {
@@ -52,6 +54,7 @@ const ForgeApp = () => {
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [currentDayKey, setCurrentDayKey] = useState(() => getTodayKey());
+  const [progressPeriod, setProgressPeriod] = useState('month'); // 'week' | 'month'
 
   // Re-render when the calendar day changes in UTC+7 (midnight Bangkok/Hanoi/Jakarta)
   useEffect(() => {
@@ -487,13 +490,12 @@ const ForgeApp = () => {
     setChatLoading(false);
   };
 
-  const getProgressData = () => {
+  const buildProgressData = (dateKeys, labelForKey = (key) => key) => {
     const data = {};
-    const monthKeys = getLastNDaysKeys(30);
 
-    monthKeys.forEach(dateStr => {
+    dateKeys.forEach(dateStr => {
       data[dateStr] = {
-        date: dateStr,
+        date: labelForKey(dateStr),
         calories: 0,
         protein: 0,
         carbs: 0,
@@ -515,8 +517,12 @@ const ForgeApp = () => {
       }
     });
 
-    return monthKeys.map(key => data[key]);
+    return dateKeys.map(key => data[key]);
   };
+
+  const getMonthlyProgressData = () => buildProgressData(getLastNDaysKeys(30));
+
+  const getWeeklyProgressData = () => buildProgressData(getCurrentWeekKeys(), getWeekdayLabel);
 
   const todayTotals = getTodayTotals();
 
@@ -2281,8 +2287,10 @@ const ForgeApp = () => {
 
   // Progress
   if (screen === 'progress') {
-    const progressData = getProgressData();
-    
+    const progressData = progressPeriod === 'week'
+      ? getWeeklyProgressData()
+      : getMonthlyProgressData();
+
     return (
       <div style={{
         minHeight: '100vh',
@@ -2308,7 +2316,40 @@ const ForgeApp = () => {
             ← Back
           </button>
 
-          <h1 style={{ fontSize: '24px', margin: '0 0 24px', fontWeight: 700 }}>30-Day Progress</h1>
+          <h1 style={{ fontSize: '24px', margin: '0 0 16px', fontWeight: 700 }}>Progress</h1>
+
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
+            {[
+              { id: 'week', label: 'Weekly' },
+              { id: 'month', label: 'Monthly' }
+            ].map(period => (
+              <button
+                key={period.id}
+                type="button"
+                onClick={() => setProgressPeriod(period.id)}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  background: progressPeriod === period.id ? '#00d9ff' : '#1a1a1a',
+                  color: progressPeriod === period.id ? '#000' : '#999',
+                  border: `1px solid ${progressPeriod === period.id ? '#00d9ff' : '#333'}`,
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {period.label}
+              </button>
+            ))}
+          </div>
+
+          <p style={{ fontSize: '12px', color: '#666', margin: '0 0 24px' }}>
+            {progressPeriod === 'week'
+              ? 'Sunday – Saturday (UTC+7)'
+              : 'Last 30 days'}
+          </p>
 
           <h2 style={{ fontSize: '14px', fontWeight: 600, margin: '0 0 16px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#00d9ff' }}>
             Daily calories
