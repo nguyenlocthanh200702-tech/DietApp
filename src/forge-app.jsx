@@ -2297,6 +2297,7 @@ const ForgeApp = () => {
         background: '#0f0f0f',
         color: '#fff',
         padding: '20px',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 52px)',
         fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
         paddingBottom: '100px'
       }}>
@@ -2310,7 +2311,9 @@ const ForgeApp = () => {
               cursor: 'pointer',
               fontSize: '14px',
               marginBottom: '24px',
-              fontWeight: 600
+              marginTop: '8px',
+              fontWeight: 600,
+              padding: '8px 0'
             }}
           >
             ← Back
@@ -2351,7 +2354,7 @@ const ForgeApp = () => {
               : 'Last 30 days'}
           </p>
 
-          <h2 style={{ fontSize: '14px', fontWeight: 600, margin: '0 0 16px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#00d9ff' }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 600, margin: '0 0 16px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#ffa500' }}>
             Daily calories
           </h2>
           <div style={{ background: '#1a1a1a', padding: '16px', borderRadius: '6px', border: '1px solid #333', marginBottom: '32px', height: '300px' }}>
@@ -2364,7 +2367,7 @@ const ForgeApp = () => {
                   contentStyle={{ background: '#222', border: '1px solid #333', borderRadius: '6px', color: '#fff' }}
                   formatter={(value) => Math.round(value)}
                 />
-                <Bar dataKey="calories" fill="#00d9ff" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="calories" fill="#ffa500" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="target" fill="#333" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
