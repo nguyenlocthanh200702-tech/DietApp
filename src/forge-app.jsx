@@ -35,7 +35,7 @@ const backNavButtonStyle = {
   color: '#00d9ff',
   cursor: 'pointer',
   fontSize: '14px',
-  marginBottom: '24px',
+  marginBottom: '16px',
   marginTop: '8px',
   fontWeight: 600,
   padding: '8px 0'
@@ -1381,12 +1381,14 @@ const ForgeApp = () => {
   if (screen === 'dashboard') {
     return (
       <div style={{
-        minHeight: '100vh',
+        height: '100vh',
         background: '#0f0f0f',
         color: '#fff',
         padding: '20px',
+        paddingTop: SCREEN_SAFE_TOP,
         fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
-        paddingBottom: '100px'
+        paddingBottom: '100px',
+        overflowY: 'auto'
       }}>
         <div style={{ maxWidth: '500px', margin: '0 auto' }}>
           {/* Header */}
