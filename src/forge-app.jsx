@@ -27,6 +27,30 @@ import {
   importLocalStorageData
 } from './lib/dataService';
 
+const SCREEN_SAFE_TOP = 'calc(env(safe-area-inset-top, 0px) + 52px)';
+
+const backNavButtonStyle = {
+  background: 'none',
+  border: 'none',
+  color: '#00d9ff',
+  cursor: 'pointer',
+  fontSize: '14px',
+  marginBottom: '24px',
+  marginTop: '8px',
+  fontWeight: 600,
+  padding: '8px 0'
+};
+
+const subScreenWrapStyle = {
+  minHeight: '100vh',
+  background: '#0f0f0f',
+  color: '#fff',
+  padding: '20px',
+  paddingTop: SCREEN_SAFE_TOP,
+  fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
+  paddingBottom: '100px'
+};
+
 const ForgeApp = () => {
   const [authUser, setAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1761,26 +1785,11 @@ const ForgeApp = () => {
   // Log Meal
   if (screen === 'log-meal') {
     return (
-      <div style={{
-        minHeight: '100vh',
-        background: '#0f0f0f',
-        color: '#fff',
-        padding: '20px',
-        fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
-        paddingBottom: '100px'
-      }}>
+      <div style={subScreenWrapStyle}>
         <div style={{ maxWidth: '500px', margin: '0 auto' }}>
           <button
             onClick={() => setScreen('dashboard')}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#00d9ff',
-              cursor: 'pointer',
-              fontSize: '14px',
-              marginBottom: '24px',
-              fontWeight: 600
-            }}
+            style={backNavButtonStyle}
           >
             ← Back
           </button>
@@ -2032,7 +2041,7 @@ const ForgeApp = () => {
       }}>
         {/* Header */}
         <div style={{
-          padding: '16px 20px',
+          padding: `calc(env(safe-area-inset-top, 0px) + 16px) 20px 16px 20px`,
           borderBottom: '1px solid #222',
           display: 'flex',
           alignItems: 'center',
@@ -2041,9 +2050,9 @@ const ForgeApp = () => {
         }}>
           <button
             onClick={() => setScreen('dashboard')}
-            style={{ background: 'none', border: 'none', color: '#00d9ff', cursor: 'pointer', fontSize: '14px', fontWeight: 600, padding: 0 }}
+            style={{ ...backNavButtonStyle, marginBottom: 0, marginTop: 0, padding: '8px 4px 8px 0' }}
           >
-            ←
+            ← Back
           </button>
           <div>
             <h1 style={{ fontSize: '18px', margin: 0, fontWeight: 700 }}>AI Coach</h1>
@@ -2292,29 +2301,11 @@ const ForgeApp = () => {
       : getMonthlyProgressData();
 
     return (
-      <div style={{
-        minHeight: '100vh',
-        background: '#0f0f0f',
-        color: '#fff',
-        padding: '20px',
-        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 52px)',
-        fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
-        paddingBottom: '100px'
-      }}>
+      <div style={subScreenWrapStyle}>
         <div style={{ maxWidth: '500px', margin: '0 auto' }}>
           <button
             onClick={() => setScreen('dashboard')}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#00d9ff',
-              cursor: 'pointer',
-              fontSize: '14px',
-              marginBottom: '24px',
-              marginTop: '8px',
-              fontWeight: 600,
-              padding: '8px 0'
-            }}
+            style={backNavButtonStyle}
           >
             ← Back
           </button>
@@ -2418,26 +2409,11 @@ const ForgeApp = () => {
   // Settings
   if (screen === 'settings') {
     return (
-      <div style={{
-        minHeight: '100vh',
-        background: '#0f0f0f',
-        color: '#fff',
-        padding: '20px',
-        fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif',
-        paddingBottom: '100px'
-      }}>
+      <div style={subScreenWrapStyle}>
         <div style={{ maxWidth: '500px', margin: '0 auto' }}>
           <button
             onClick={() => setScreen('dashboard')}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#00d9ff',
-              cursor: 'pointer',
-              fontSize: '14px',
-              marginBottom: '24px',
-              fontWeight: '600'
-            }}
+            style={backNavButtonStyle}
           >
             ← Back
           </button>
