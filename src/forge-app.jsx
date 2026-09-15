@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import AuthScreen from './components/AuthScreen';
+import ProfilePickerScreen from './components/ProfilePickerScreen';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { getDisplayUsername } from './lib/authHelpers';
 import {
@@ -10,10 +11,19 @@ import {
   getLastNDaysKeys,
   getCurrentWeekKeys,
   getWeekdayLabel,
-  isWithinLastDaysInAppTz
+  isWithinLastDaysInAppTz,
+  setAppTimeZone,
+  getAppTimeZone
 } from './lib/dateUtils';
 import {
+  getTimezoneProfile,
+  getTimeZoneForProfileKey,
+  storeActiveProfileKey,
+  formatTimeZoneLabel
+} from './lib/timezoneProfiles';
+import {
   fetchProfile,
+  fetchProfileSummaries,
   saveProfile,
   deleteProfile,
   fetchMeals,
@@ -79,8 +89,10 @@ const ForgeApp = () => {
   const [chatLoading, setChatLoading] = useState(false);
   const [currentDayKey, setCurrentDayKey] = useState(() => getTodayKey());
   const [progressPeriod, setProgressPeriod] = useState('month'); // 'week' | 'month'
+  const [activeTimezoneKey, setActiveTimezoneKey] = useState('local');
+  const [profileSummaries, setProfileSummaries] = useState([]);
+  const [profileSessionReady, setProfileSessionReady] = useState(false);
 
-  // Re-render when the calendar day changes in UTC+7 (midnight Bangkok/Hanoi/Jakarta)
   useEffect(() => {
     const syncDay = () => {
       const today = getTodayKey();
@@ -94,37 +106,66 @@ const ForgeApp = () => {
       clearInterval(interval);
       window.removeEventListener('focus', syncDay);
     };
-  }, []);
+  }, [activeTimezoneKey]);
+
+  const loadProfileData = async (userId, timezoneKey) => {
+    setAppTimeZone(getTimeZoneForProfileKey(timezoneKey));
+    setActiveTimezoneKey(timezoneKey);
+    storeActiveProfileKey(userId, timezoneKey);
+    setCurrentDayKey(getTodayKey());
+
+    let profile = await fetchProfile(userId, timezoneKey);
+
+    if (!profile && timezoneKey === 'local' && (localStorage.getItem('forgeUserData') || localStorage.getItem('forgeMeals'))) {
+      await importLocalStorageData(userId, 'local');
+      profile = await fetchProfile(userId, 'local');
+    }
+
+    const [mealsData, waterData, summaries] = await Promise.all([
+      fetchMeals(userId, timezoneKey),
+      fetchWaterTracker(userId, timezoneKey),
+      fetchProfileSummaries(userId)
+    ]);
+
+    setProfileSummaries(summaries);
+    setMeals(mealsData);
+    setWaterTracker(waterData);
+
+    if (profile) {
+      setUserData(profile);
+      setScreen('dashboard');
+    } else {
+      setUserData(null);
+      setOnboardingStep(1);
+      setScreen('onboarding');
+    }
+
+    setProfileSessionReady(true);
+  };
 
   const loadUserData = async (userId) => {
     setDataLoading(true);
     try {
-      let profile = await fetchProfile(userId);
-
-      if (!profile && (localStorage.getItem('forgeUserData') || localStorage.getItem('forgeMeals'))) {
-        await importLocalStorageData(userId);
-        profile = await fetchProfile(userId);
-      }
-
-      const [mealsData, waterData] = await Promise.all([
-        fetchMeals(userId),
-        fetchWaterTracker(userId)
-      ]);
-
-      setMeals(mealsData);
-      setWaterTracker(waterData);
-
-      if (profile) {
-        setUserData(profile);
-        setScreen('dashboard');
-      } else {
-        setUserData(null);
-        setOnboardingStep(1);
-        setScreen('onboarding');
-      }
+      const summaries = await fetchProfileSummaries(userId);
+      setProfileSummaries(summaries);
+      setProfileSessionReady(false);
+      setScreen('profile-picker');
     } catch (error) {
       console.error('Failed to load user data:', error);
       alert('Failed to load your data. Please refresh and try again.');
+    } finally {
+      setDataLoading(false);
+    }
+  };
+
+  const handleSelectProfile = async (timezoneKey) => {
+    if (!authUser) return;
+    setDataLoading(true);
+    try {
+      await loadProfileData(authUser.id, timezoneKey);
+    } catch (error) {
+      console.error('Failed to load profile:', error);
+      alert('Failed to load this profile. Please try again.');
     } finally {
       setDataLoading(false);
     }
@@ -155,6 +196,8 @@ const ForgeApp = () => {
       setUserData(null);
       setMeals([]);
       setWaterTracker({});
+      setProfileSessionReady(false);
+      setProfileSummaries([]);
     }
   }, [authUser, authLoading]);
 
@@ -228,7 +271,7 @@ const ForgeApp = () => {
   const addMeal = async (meal) => {
     if (!authUser) return;
     try {
-      const saved = await insertMeal(authUser.id, meal);
+      const saved = await insertMeal(authUser.id, activeTimezoneKey, meal);
       setMeals(prev => [saved, ...prev]);
     } catch (error) {
       console.error('Failed to save meal:', error);
@@ -239,7 +282,9 @@ const ForgeApp = () => {
   const completeOnboarding = async (profileData) => {
     if (!authUser) return;
     try {
-      await saveProfile(authUser.id, profileData);
+      await saveProfile(authUser.id, activeTimezoneKey, profileData);
+      const summaries = await fetchProfileSummaries(authUser.id);
+      setProfileSummaries(summaries);
       setUserData(profileData);
       setOnboardingProfile(null);
       setOnboardingStep(1);
@@ -633,6 +678,20 @@ const ForgeApp = () => {
   if (!authUser) {
     return <AuthScreen />;
   }
+
+  if (!profileSessionReady) {
+    if (dataLoading && profileSummaries.length === 0) {
+      return loadingScreen;
+    }
+    return (
+      <ProfilePickerScreen
+        summaries={profileSummaries}
+        onSelect={handleSelectProfile}
+      />
+    );
+  }
+
+  const activeProfileMeta = getTimezoneProfile(activeTimezoneKey);
 
   // Screens
   if (screen === 'onboarding') {
@@ -1394,7 +1453,15 @@ const ForgeApp = () => {
           {/* Header */}
           <div style={{ marginBottom: '32px' }}>
             <p style={{ fontSize: '12px', color: '#999', margin: '0 0 8px', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.5px' }}>
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+              {new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                month: 'short',
+                day: 'numeric',
+                timeZone: getAppTimeZone()
+              })}
+            </p>
+            <p style={{ fontSize: '11px', color: '#666', margin: '0 0 6px' }}>
+              {activeProfileMeta.title} · {formatTimeZoneLabel(getAppTimeZone())}
             </p>
             <h1 style={{ fontSize: '28px', margin: 0, fontWeight: 700 }}>Welcome back, {userData?.name}</h1>
           </div>
@@ -1493,7 +1560,7 @@ const ForgeApp = () => {
                       setWaterTracker(updated);
                       if (authUser) {
                         try {
-                          await upsertWaterLog(authUser.id, today, newVal);
+                          await upsertWaterLog(authUser.id, activeTimezoneKey, today, newVal);
                         } catch (error) {
                           console.error('Failed to save water intake:', error);
                         }
@@ -2343,8 +2410,8 @@ const ForgeApp = () => {
 
           <p style={{ fontSize: '12px', color: '#666', margin: '0 0 24px' }}>
             {progressPeriod === 'week'
-              ? 'Sunday – Saturday (UTC+7)'
-              : 'Last 30 days'}
+              ? `Sunday – Saturday · ${formatTimeZoneLabel(getAppTimeZone())}`
+              : `Last 30 days · ${formatTimeZoneLabel(getAppTimeZone())}`}
           </p>
 
           <h2 style={{ fontSize: '14px', fontWeight: 600, margin: '0 0 16px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#ffa500' }}>
@@ -2437,6 +2504,28 @@ const ForgeApp = () => {
               gap: '12px'
             }}>
               <p style={{ fontSize: '14px', margin: 0, color: '#ccc' }}>@{getDisplayUsername(authUser)}</p>
+              <p style={{ fontSize: '12px', margin: 0, color: '#888' }}>
+                Active profile: {activeProfileMeta.title}
+              </p>
+              <button
+                onClick={() => {
+                  setProfileSessionReady(false);
+                  setScreen('profile-picker');
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: '#222',
+                  color: '#00d9ff',
+                  border: '1px solid #444',
+                  borderRadius: '6px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Switch profile
+              </button>
               <button
                 onClick={() => supabase.auth.signOut()}
                 style={{
@@ -2583,10 +2672,12 @@ const ForgeApp = () => {
               onClick={async () => {
                 if (!authUser) return;
                 try {
-                  await deleteProfile(authUser.id);
+                  await deleteProfile(authUser.id, activeTimezoneKey);
                   setUserData(null);
                   setOnboardingStep(1);
                   setScreen('onboarding');
+                  const summaries = await fetchProfileSummaries(authUser.id);
+                  setProfileSummaries(summaries);
                 } catch (error) {
                   console.error('Failed to reset profile:', error);
                   alert('Failed to reset profile. Please try again.');
@@ -2623,10 +2714,12 @@ const ForgeApp = () => {
                 if (window.confirm('Delete all data? This cannot be undone.')) {
                   try {
                     await Promise.all([
-                      deleteAllMeals(authUser.id),
-                      deleteAllWaterLogs(authUser.id),
-                      deleteProfile(authUser.id)
+                      deleteAllMeals(authUser.id, activeTimezoneKey),
+                      deleteAllWaterLogs(authUser.id, activeTimezoneKey),
+                      deleteProfile(authUser.id, activeTimezoneKey)
                     ]);
+                    const summaries = await fetchProfileSummaries(authUser.id);
+                    setProfileSummaries(summaries);
                     setUserData(null);
                     setMeals([]);
                     setWaterTracker({});

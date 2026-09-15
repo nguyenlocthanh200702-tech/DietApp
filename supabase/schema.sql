@@ -5,7 +5,7 @@
 -- In Supabase Dashboard → Authentication → Providers → Email:
 --   turn OFF "Confirm email" so sign-up works without email verification.
 
--- Profile (one row per user, linked to Supabase Auth)
+-- Legacy profile table (kept for older deployments; app prefers user_profiles)
 create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   name text not null,
