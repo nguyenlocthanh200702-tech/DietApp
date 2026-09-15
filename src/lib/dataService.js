@@ -22,10 +22,10 @@ function profileRowToUserData(row) {
   };
 }
 
-function userDataToUserProfileRow(userId, timezoneKey, userData) {
+function userDataToUserProfileRow(userId, userData) {
   return {
     user_id: userId,
-    timezone_key: timezoneKey,
+    timezone_key: 'local',
     name: userData.name,
     weight: userData.weight,
     height: userData.height,
@@ -79,27 +79,6 @@ async function usesUserProfilesTable() {
   return !error;
 }
 
-export async function fetchProfileSummaries(userId) {
-  if (await usesUserProfilesTable()) {
-    const { data, error } = await supabase
-      .from('user_profiles')
-      .select('timezone_key, name')
-      .eq('user_id', userId);
-
-    if (error) throw error;
-    return (data || []).map(row => ({
-      timezoneKey: row.timezone_key,
-      name: row.name
-    }));
-  }
-
-  const legacy = await fetchLegacyProfile(userId);
-  if (legacy) {
-    return [{ timezoneKey: 'local', name: legacy.name }];
-  }
-  return [];
-}
-
 export async function fetchLegacyProfile(userId) {
   const { data, error } = await supabase
     .from('profiles')
@@ -111,76 +90,81 @@ export async function fetchLegacyProfile(userId) {
   return profileRowToUserData(data);
 }
 
-export async function fetchProfile(userId, timezoneKey = 'local') {
-  if (await usesUserProfilesTable()) {
-    const { data, error } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('timezone_key', timezoneKey)
-      .maybeSingle();
+export async function fetchProfile(userId) {
+  const legacy = await fetchLegacyProfile(userId);
+  if (legacy) return legacy;
 
-    if (error) throw error;
-    return profileRowToUserData(data);
+  if (!(await usesUserProfilesTable())) {
+    return null;
   }
 
-  if (timezoneKey === 'local') {
-    return fetchLegacyProfile(userId);
-  }
-  return null;
+  const { data: localRow, error: localError } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('timezone_key', 'local')
+    .maybeSingle();
+
+  if (localError) throw localError;
+  if (localRow) return profileRowToUserData(localRow);
+
+  const { data: anyRows, error: anyError } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+    .limit(1);
+
+  if (anyError) throw anyError;
+  const fallback = anyRows?.[0];
+  if (!fallback) return null;
+
+  const userData = profileRowToUserData(fallback);
+  await saveProfile(userId, userData);
+  return userData;
 }
 
-export async function saveProfile(userId, timezoneKey, userData) {
+export async function saveProfile(userId, userData) {
   if (await usesUserProfilesTable()) {
-    const row = userDataToUserProfileRow(userId, timezoneKey, userData);
+    const row = userDataToUserProfileRow(userId, userData);
     const { error } = await supabase
       .from('user_profiles')
       .upsert(row, { onConflict: 'user_id,timezone_key' });
     if (error) throw error;
-    return;
   }
 
-  if (timezoneKey === 'local') {
-    const row = userDataToLegacyProfileRow(userId, userData);
-    const { error } = await supabase.from('profiles').upsert(row);
-    if (error) throw error;
+  const legacyRow = userDataToLegacyProfileRow(userId, userData);
+  const { error: legacyError } = await supabase.from('profiles').upsert(legacyRow);
+  if (legacyError && legacyError.code !== '42P01') {
+    throw legacyError;
   }
 }
 
-export async function deleteProfile(userId, timezoneKey) {
+export async function deleteProfile(userId) {
   if (await usesUserProfilesTable()) {
     const { error } = await supabase
       .from('user_profiles')
       .delete()
-      .eq('user_id', userId)
-      .eq('timezone_key', timezoneKey);
+      .eq('user_id', userId);
     if (error) throw error;
-    return;
   }
 
-  if (timezoneKey === 'local') {
-    const { error } = await supabase.from('profiles').delete().eq('id', userId);
-    if (error) throw error;
-  }
+  const { error } = await supabase.from('profiles').delete().eq('id', userId);
+  if (error && error.code !== '42P01') throw error;
 }
 
-export async function fetchMeals(userId, timezoneKey = 'local') {
-  let query = supabase
+export async function fetchMeals(userId) {
+  const { data, error } = await supabase
     .from('meals')
     .select('*')
     .eq('user_id', userId)
     .order('logged_at', { ascending: false });
 
-  if (await usesUserProfilesTable()) {
-    query = query.eq('timezone_key', timezoneKey);
-  }
-
-  const { data, error } = await query;
   if (error) throw error;
   return (data || []).map(mealRowToMeal);
 }
 
-export async function insertMeal(userId, timezoneKey, meal) {
+export async function insertMeal(userId, meal) {
   const payload = {
     user_id: userId,
     logged_at: meal.timestamp,
@@ -193,7 +177,7 @@ export async function insertMeal(userId, timezoneKey, meal) {
   };
 
   if (await usesUserProfilesTable()) {
-    payload.timezone_key = timezoneKey;
+    payload.timezone_key = 'local';
   }
 
   const { data, error } = await supabase.from('meals').insert(payload).select().single();
@@ -231,87 +215,75 @@ export async function deleteMeal(userId, mealId) {
   if (error) throw error;
 }
 
-export async function fetchWaterTracker(userId, timezoneKey = 'local') {
-  let query = supabase
+export async function fetchWaterTracker(userId) {
+  const { data, error } = await supabase
     .from('water_logs')
     .select('log_date, amount_ml')
     .eq('user_id', userId);
 
-  if (await usesUserProfilesTable()) {
-    query = query.eq('timezone_key', timezoneKey);
-  }
-
-  const { data, error } = await query;
   if (error) throw error;
 
   const tracker = {};
   (data || []).forEach(row => {
-    tracker[row.log_date] = row.amount_ml;
+    const existing = tracker[row.log_date];
+    if (existing == null || row.amount_ml > existing) {
+      tracker[row.log_date] = row.amount_ml;
+    }
   });
   return tracker;
 }
 
-export async function upsertWaterLog(userId, timezoneKey, date, amountMl) {
-  const row = {
-    user_id: userId,
-    log_date: date,
-    amount_ml: amountMl
-  };
-
+export async function upsertWaterLog(userId, date, amountMl) {
   if (await usesUserProfilesTable()) {
-    row.timezone_key = timezoneKey;
     const { error } = await supabase
       .from('water_logs')
-      .upsert(row, { onConflict: 'user_id,timezone_key,log_date' });
-    if (error) throw error;
-    return;
+      .upsert(
+        { user_id: userId, log_date: date, amount_ml: amountMl, timezone_key: 'local' },
+        { onConflict: 'user_id,timezone_key,log_date' }
+      );
+    if (!error) return;
   }
 
   const { error } = await supabase
     .from('water_logs')
-    .upsert(row, { onConflict: 'user_id,log_date' });
+    .upsert(
+      { user_id: userId, log_date: date, amount_ml: amountMl },
+      { onConflict: 'user_id,log_date' }
+    );
   if (error) throw error;
 }
 
-export async function deleteAllMeals(userId, timezoneKey) {
-  let query = supabase.from('meals').delete().eq('user_id', userId);
-  if (await usesUserProfilesTable()) {
-    query = query.eq('timezone_key', timezoneKey);
-  }
-  const { error } = await query;
+export async function deleteAllMeals(userId) {
+  const { error } = await supabase.from('meals').delete().eq('user_id', userId);
   if (error) throw error;
 }
 
-export async function deleteAllWaterLogs(userId, timezoneKey) {
-  let query = supabase.from('water_logs').delete().eq('user_id', userId);
-  if (await usesUserProfilesTable()) {
-    query = query.eq('timezone_key', timezoneKey);
-  }
-  const { error } = await query;
+export async function deleteAllWaterLogs(userId) {
+  const { error } = await supabase.from('water_logs').delete().eq('user_id', userId);
   if (error) throw error;
 }
 
-export async function importLocalStorageData(userId, timezoneKey = 'local') {
+export async function importLocalStorageData(userId) {
   const savedProfile = localStorage.getItem('forgeUserData');
   const savedMeals = localStorage.getItem('forgeMeals');
   const savedWater = localStorage.getItem('forgeWaterTracker');
 
   if (savedProfile) {
     const userData = JSON.parse(savedProfile);
-    await saveProfile(userId, timezoneKey, userData);
+    await saveProfile(userId, userData);
   }
 
   if (savedMeals) {
     const meals = JSON.parse(savedMeals);
     for (const meal of meals) {
-      await insertMeal(userId, timezoneKey, meal);
+      await insertMeal(userId, meal);
     }
   }
 
   if (savedWater) {
     const tracker = JSON.parse(savedWater);
     for (const [date, amount] of Object.entries(tracker)) {
-      await upsertWaterLog(userId, timezoneKey, date, amount);
+      await upsertWaterLog(userId, date, amount);
     }
   }
 

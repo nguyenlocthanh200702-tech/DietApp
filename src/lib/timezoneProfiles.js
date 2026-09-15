@@ -21,16 +21,22 @@ export function getTimeZoneForProfileKey(key) {
   return getTimezoneProfile(key).getTimeZone();
 }
 
-export function getActiveProfileStorageKey(userId) {
-  return `forgeActiveProfile:${userId}`;
+export function getTimezonePreferenceStorageKey(userId) {
+  return `forgeTimezonePreference:${userId}`;
 }
 
-export function loadStoredActiveProfileKey(userId) {
-  return localStorage.getItem(getActiveProfileStorageKey(userId));
+export function loadStoredTimezoneKey(userId) {
+  const stored =
+    localStorage.getItem(getTimezonePreferenceStorageKey(userId))
+    || localStorage.getItem(`forgeActiveProfile:${userId}`);
+  if (stored && TIMEZONE_PROFILES.some(p => p.key === stored)) {
+    return stored;
+  }
+  return 'local';
 }
 
-export function storeActiveProfileKey(userId, profileKey) {
-  localStorage.setItem(getActiveProfileStorageKey(userId), profileKey);
+export function storeTimezoneKey(userId, profileKey) {
+  localStorage.setItem(getTimezonePreferenceStorageKey(userId), profileKey);
 }
 
 export function formatTimeZoneLabel(timeZone) {
