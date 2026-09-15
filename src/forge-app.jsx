@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import AuthScreen from './components/AuthScreen';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -106,15 +106,15 @@ const ForgeApp = () => {
     };
   }, [activeTimezoneKey]);
 
-  const applyTimezoneKey = (userId, timezoneKey) => {
+  const applyTimezoneKey = useCallback((userId, timezoneKey) => {
     const key = timezoneKey || 'local';
     setActiveTimezoneKey(key);
     setAppTimeZone(getTimeZoneForProfileKey(key));
     if (userId) storeTimezoneKey(userId, key);
     setCurrentDayKey(getTodayKey());
-  };
+  }, []);
 
-  const loadUserData = async (userId) => {
+  const loadUserData = useCallback(async (userId) => {
     setDataLoading(true);
     try {
       applyTimezoneKey(userId, loadStoredTimezoneKey(userId));
@@ -149,7 +149,7 @@ const ForgeApp = () => {
     } finally {
       setDataLoading(false);
     }
-  };
+  }, [applyTimezoneKey]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -177,7 +177,7 @@ const ForgeApp = () => {
       setMeals([]);
       setWaterTracker({});
     }
-  }, [authUser, authLoading]);
+  }, [authUser, authLoading, loadUserData]);
 
   // Calculate macro targets based on user data
   const calculateMacroTargets = (weight, height, age, goal, activityLevel) => {
